@@ -18,12 +18,11 @@ git clone https://github.com/yourusername/griptape-nodes-library-minimax.git
 cd griptape-nodes-library-minimax
 ```
 
-2. Install dependencies:
-```bash
-uv sync
-```
+2. Add the full path to `griptape_nodes_library.json` in /minimax in your current working directory. You can get your current working directory with the `pwd` command on MacOS or Linux.
 
 3. Add your MINIMAX_API_KEY to Griptape Nodes in the **Settings** → **API Keys & Secrets** menu
+
+4. Drag a node from the Minimax category in the Node Sidebar onto your canvas and start creating!
 
 ## 🎨 Available Nodes
 
