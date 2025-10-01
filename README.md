@@ -23,12 +23,7 @@ cd griptape-nodes-library-minimax
 uv sync
 ```
 
-3. Set up your Minimax API key:
-```bash
-export MINIMAX_API_KEY="your_api_key_here"
-```
-
-Or add it to your Griptape Nodes configuration under the Minimax service settings.
+3. Add your MINIMAX_API_KEY to Griptape Nodes in the **Settings** → **API Keys & Secrets** menu
 
 ## 🎨 Available Nodes
 
