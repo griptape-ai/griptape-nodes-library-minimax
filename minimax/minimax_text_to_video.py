@@ -195,41 +195,59 @@ class MinimaxTextToVideo(DataNode):
         )
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
-        """Handle parameter value changes."""
+        """Handle parameter value changes and enforce model/duration constraints."""
         if parameter.name == "model":
             if value == "MiniMax-Hailuo-02":
                 # Show fast_pretreatment for Hailuo-02
                 self.show_parameter_by_name("fast_pretreatment")
-                # Update resolution options for Hailuo-02
-                resolution_param = self.get_parameter_by_name("resolution")
-                if resolution_param:
-                    # Get the Options trait and update choices
-                    for child in resolution_param.children:
-                        if hasattr(child, 'choices'):
-                            child.choices = RESOLUTION_OPTIONS_HAILUO
-                            break
+                # Update resolution options based on current duration
+                self._update_resolution_options_for_hailuo()
+                # Reset resolution to default 768P
+                self.set_parameter_value("resolution", "768P")
             else:
                 # Hide fast_pretreatment for other models
                 self.hide_parameter_by_name("fast_pretreatment")
-                # Update resolution options for other models
+                # Other models: only 6s duration and 720P resolution
+                self.set_parameter_value("duration", 6)
+                # Update resolution options to 720P only
                 resolution_param = self.get_parameter_by_name("resolution")
                 if resolution_param:
-                    # Get the Options trait and update choices
                     for child in resolution_param.children:
                         if hasattr(child, 'choices'):
                             child.choices = RESOLUTION_OPTIONS_OTHER
                             break
-                    # Set default to 720P for other models
                     self.set_parameter_value("resolution", "720P")
         
-        if parameter.name == "duration" and value == 10:
-            # 10s only available for Hailuo-02 at 512P/768P
+        if parameter.name == "duration":
             model = self.get_parameter_value("model")
-            if model != "MiniMax-Hailuo-02":
-                # Reset to 6s if not Hailuo-02
+            if model == "MiniMax-Hailuo-02":
+                # Update resolution options based on duration
+                self._update_resolution_options_for_hailuo()
+            elif value == 10:
+                # Other models don't support 10s, reset to 6s
                 self.set_parameter_value("duration", 6)
         
         return super().after_value_set(parameter, value)
+    
+    def _update_resolution_options_for_hailuo(self) -> None:
+        """Update resolution options for MiniMax-Hailuo-02 based on duration."""
+        duration = self.get_parameter_value("duration")
+        resolution_param = self.get_parameter_by_name("resolution")
+        current_resolution = self.get_parameter_value("resolution")
+        
+        if resolution_param:
+            for child in resolution_param.children:
+                if hasattr(child, 'choices'):
+                    if duration == 10:
+                        # 10s: only 512P and 768P available
+                        child.choices = ["512P", "768P"]
+                        # If current resolution is 1080P, change to 768P
+                        if current_resolution == "1080P":
+                            self.set_parameter_value("resolution", "768P")
+                    else:
+                        # 6s: all resolutions available (512P, 768P, 1080P)
+                        child.choices = RESOLUTION_OPTIONS_HAILUO
+                    break
 
     def _log(self, message: str) -> None:
         """Safe logging with exception suppression."""
