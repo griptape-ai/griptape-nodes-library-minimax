@@ -1,0 +1,22 @@
+[project]
+name = "minimax"
+version = "0.1.0"
+description = "Griptape Nodes Node Library for Minimax"
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+readme = "README.md"
+requires-python = ">3.12"
+dependencies = [
+    "griptape-nodes","requests","Pillow"
+]
+
+[tool.uv.sources]
+griptape-nodes = { git = "https://github.com/griptape-ai/griptape-nodes", rev="latest"}
+
+[tool.hatch.build.targets.wheel]
+packages = ["minimax"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

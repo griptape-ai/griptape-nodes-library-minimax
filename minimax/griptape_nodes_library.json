@@ -1,0 +1,88 @@
+{
+  "name": "Minimax",
+  "library_schema_version": "0.1.0",
+  "settings": [
+    {
+      "description": "Environment variables for storing secrets for new AI service's nodes",
+      "category": "nodes.Minimax",
+      "contents": {
+          "MINIMAX_API_KEY": "$MINIMAX_API_KEY"
+      }
+    }
+  ],
+  "metadata": {
+    "author": "Ian Massingham",
+    "description": "Nodes to use Minimax API",
+    "library_version": "0.1.0",
+    "engine_version": "0.55.0",
+    "tags": [
+      "Griptape",
+      "AI",
+      "Minimax",
+      "Image",
+      "Video"
+    ],
+    "dependencies": {
+      "pip_dependencies": [
+        "requests",
+        "Pillow"
+      ]
+    }
+  },
+  "categories": [
+    {
+      "image/minimax": {
+        "color": "border-purple-500",
+        "title": "Image/Minimax",
+        "description": "Image related nodes using Minimax API",
+        "icon": "Image"
+      }
+    },
+    {
+      "video/minimax": {
+        "color": "border-pink-500",
+        "title": "Video/Minimax",
+        "description": "Video related nodes using Minimax API",
+        "icon": "Video"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "class_name": "MinimaxTextToImage",
+      "file_path": "minimax_text_to_image.py",
+      "metadata": {
+        "category": "image/minimax",
+        "description": "Generate images using Minimax API.",
+        "display_name": "Minimax Text-to-Image"
+      }
+    },
+    {
+      "class_name": "MinimaxTextToVideo",
+      "file_path": "minimax_text_to_video.py",
+      "metadata": {
+        "category": "video/minimax",
+        "description": "Generate videos using Minimax text-to-video API.",
+        "display_name": "Minimax Text-to-Video"
+      }
+    },
+    {
+      "class_name": "MinimaxImageToVideo",
+      "file_path": "minimax_image_to_video.py",
+      "metadata": {
+        "category": "video/minimax",
+        "description": "Generate videos using Minimax image-to-video API.",
+        "display_name": "Minimax Image-to-Video"
+      }
+    },
+    {
+      "class_name": "MinimaxFirstLastFrameToVideo",
+      "file_path": "minimax_first_last_frame_to_video.py",
+      "metadata": {
+        "category": "video/minimax",
+        "description": "Generate videos between two key frames using Minimax API.",
+        "display_name": "Minimax First-Last Frame-to-Video"
+      }
+    }
+  ]
+}
