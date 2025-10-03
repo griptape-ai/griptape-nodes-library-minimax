@@ -464,9 +464,22 @@ class MinimaxImageToImage(DataNode):
                         response.raise_for_status()
                         image_bytes = response.content
                         
-                        # Detect mime type
+                        # Open image and check format
                         img = Image.open(BytesIO(image_bytes))
-                        mime_type = f"image/{img.format.lower()}"
+                        
+                        # Convert unsupported formats (MPO, etc.) to JPEG
+                        if img.format not in ['JPEG', 'PNG']:
+                            self._log(f"Converting {img.format} to JPEG for API compatibility")
+                            # Convert to RGB if needed (for formats like MPO)
+                            if img.mode not in ['RGB', 'L']:
+                                img = img.convert('RGB')
+                            # Save as JPEG to bytes
+                            output = BytesIO()
+                            img.save(output, format='JPEG', quality=95)
+                            image_bytes = output.getvalue()
+                            mime_type = "image/jpeg"
+                        else:
+                            mime_type = f"image/{img.format.lower()}"
                         
                         # Convert to base64 data URL
                         b64_data = base64.b64encode(image_bytes).decode('utf-8')
@@ -497,9 +510,22 @@ class MinimaxImageToImage(DataNode):
                     image_bytes = image_artifact.value.read()
                     image_artifact.value.seek(0)
                     
-                    # Detect mime type
+                    # Open image and check format
                     img = Image.open(BytesIO(image_bytes))
-                    mime_type = f"image/{img.format.lower()}"
+                    
+                    # Convert unsupported formats (MPO, etc.) to JPEG
+                    if img.format not in ['JPEG', 'PNG']:
+                        self._log(f"Converting {img.format} to JPEG for API compatibility")
+                        # Convert to RGB if needed (for formats like MPO)
+                        if img.mode not in ['RGB', 'L']:
+                            img = img.convert('RGB')
+                        # Save as JPEG to bytes
+                        output = BytesIO()
+                        img.save(output, format='JPEG', quality=95)
+                        image_bytes = output.getvalue()
+                        mime_type = "image/jpeg"
+                    else:
+                        mime_type = f"image/{img.format.lower()}"
                     
                     # Convert to base64
                     b64_data = base64.b64encode(image_bytes).decode('utf-8')
