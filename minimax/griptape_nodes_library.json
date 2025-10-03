@@ -67,6 +67,15 @@
       }
     },
     {
+      "class_name": "MinimaxImageToImage",
+      "file_path": "minimax_image_to_image.py",
+      "metadata": {
+        "category": "image/minimax",
+        "description": "Generate images from reference images using Minimax API.",
+        "display_name": "Minimax Image-to-Image"
+      }
+    },
+    {
       "class_name": "MinimaxTextToVideo",
       "file_path": "minimax_text_to_video.py",
       "metadata": {

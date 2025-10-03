@@ -55,6 +55,49 @@ Generate high-quality images from text descriptions using Minimax's image genera
 - Optional prompt optimization
 - Seed-based reproducibility
 
+#### **Minimax Image-to-Image**
+
+Generate images from reference images using Minimax's image-to-image API. Perfect for portrait generation and character consistency.
+
+**Inputs:**
+- **Prompt** (str): Text description of the image (up to 1500 characters)
+- **Reference Image** (ImageArtifact | ImageUrlArtifact): Reference image for subject
+  - Best results: single front-facing portrait photo
+  - Formats: JPG, JPEG, PNG (< 10MB)
+- **Model** (str): Model selection
+  - `image-01` (default): Standard quality
+  - `image-01-live`: Real-time optimized
+- **Subject Type** (str, hidden): Subject type (`character` - currently only option)
+- **Aspect Ratio** (str): Image dimensions or "Use height and width" for custom sizes
+  - Options: `1:1`, `16:9`, `4:3`, `3:2`, `2:3`, `3:4`, `9:16`, `21:9`, or custom
+- **Height** (int, hidden): Custom height when using custom dimensions (512-2048, multiple of 8)
+- **Width** (int, hidden): Custom width when using custom dimensions (512-2048, multiple of 8)
+- **Seed** (int): Random seed for reproducibility (-1 for random, default: -1)
+- **Number of Images** (int, hidden): Generate multiple images (1-9, default: 1)
+- **Prompt Optimizer** (bool): Automatically enhance prompts (default: False)
+
+**Outputs:**
+- **Image** (ImageUrlArtifact): Generated image (single result)
+- **Images** (list[ImageUrlArtifact]): All generated images (when num_images > 1)
+- **Provider Response** (dict): Full API response
+
+**Features:**
+- Reference image support with automatic format validation
+- Smart localhost URL detection and base64 conversion
+- Multiple aspect ratios and custom dimensions (image-01 only)
+- Multiple image generation (up to 9 images)
+- Character consistency across generations
+
+**Use Cases:**
+- **Portrait Generation**: Create consistent character portraits
+  - Game character design variations
+  - Avatar customization
+  - Profile picture generation
+- **Style Transfer**: Apply styles to reference images
+  - Artistic interpretations
+  - Costume/outfit variations
+  - Different lighting and poses
+
 ### 🎥 Video Generation
 
 #### **Minimax Text-to-Video**
