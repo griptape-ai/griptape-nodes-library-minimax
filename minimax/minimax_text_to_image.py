@@ -144,7 +144,7 @@ class MinimaxTextToImage(DataNode):
                 traits={Slider(min_val=1, max_val=9)},
                 ui_options={
                     "display_name": "Number of Images",
-                    "hide": True
+                    "hide": False
                 },
             )
         )
@@ -437,12 +437,6 @@ class MinimaxTextToImage(DataNode):
 
     def _handle_response(self, response: dict[str, Any]) -> None:
         """Handle the API response and set output parameters."""
-        # Debug: Print full API response
-        self._log("=== FULL API RESPONSE DEBUG ===")
-        self._log(f"Response type: {type(response)}")
-        self._log(f"Response keys: {list(response.keys()) if isinstance(response, dict) else 'Not a dict'}")
-        self._log(f"Full response: {_json.dumps(response, indent=2, ensure_ascii=False)}")
-        self._log("=== END API RESPONSE DEBUG ===")
         
         self.parameter_output_values["provider_response"] = response
         
