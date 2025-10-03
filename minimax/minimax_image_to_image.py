@@ -591,10 +591,10 @@ class MinimaxImageToImage(DataNode):
             sanitized_payload = deepcopy(payload)
             if "prompt" in sanitized_payload and len(sanitized_payload["prompt"]) > PROMPT_TRUNCATE_LENGTH:
                 sanitized_payload["prompt"] = sanitized_payload["prompt"][:PROMPT_TRUNCATE_LENGTH] + "..."
-            if "subject_reference" in sanitized_payload and "image_file" in sanitized_payload["subject_reference"]:
-                image_data = sanitized_payload["subject_reference"]["image_file"]
-                if len(image_data) > PROMPT_TRUNCATE_LENGTH:
-                    sanitized_payload["subject_reference"]["image_file"] = image_data[:PROMPT_TRUNCATE_LENGTH] + "..."
+            if "subject_reference" in sanitized_payload and isinstance(sanitized_payload["subject_reference"], list):
+                for ref in sanitized_payload["subject_reference"]:
+                    if "image_file" in ref and len(ref["image_file"]) > PROMPT_TRUNCATE_LENGTH:
+                        ref["image_file"] = ref["image_file"][:PROMPT_TRUNCATE_LENGTH] + "..."
             
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
