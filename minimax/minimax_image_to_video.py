@@ -11,6 +11,7 @@ from typing import Any
 
 import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact, VideoUrlArtifact
+from PIL import Image
 
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
@@ -336,9 +337,6 @@ class MinimaxImageToVideo(DataNode):
                 
                 # Validate format and dimensions using PIL
                 try:
-                    from PIL import Image
-                    from io import BytesIO
-                    
                     img = Image.open(BytesIO(image_bytes))
                     
                     # Validate format
@@ -348,7 +346,6 @@ class MinimaxImageToVideo(DataNode):
                     # Validate dimensions
                     width, height = img.size
                     short_edge = min(width, height)
-                    long_edge = max(width, height)
                     
                     if short_edge <= 300:
                         exceptions.append(ValueError(f"{self.name}: Image short edge must be > 300px (current: {short_edge}px)"))
@@ -533,9 +530,6 @@ class MinimaxImageToVideo(DataNode):
                     
                     # Detect and convert unsupported formats with PIL
                     try:
-                        from PIL import Image
-                        from io import BytesIO
-                        
                         img = Image.open(BytesIO(image_bytes))
                         
                         # Convert unsupported formats (MPO, etc.) to JPEG
@@ -609,9 +603,6 @@ class MinimaxImageToVideo(DataNode):
                 # Detect image format and convert unsupported formats using PIL
                 mime_type = "image/jpeg"  # Default
                 try:
-                    from PIL import Image
-                    from io import BytesIO
-                    
                     img = Image.open(BytesIO(image_bytes))
                     
                     # Convert unsupported formats (MPO, etc.) to JPEG
