@@ -20,7 +20,8 @@
       "AI",
       "Minimax",
       "Image",
-      "Video"
+      "Video",
+      "Audio"
     ],
     "dependencies": {
       "pip_dependencies": [
@@ -44,6 +45,14 @@
         "title": "Video/Minimax",
         "description": "Video related nodes using Minimax API",
         "icon": "Video"
+      }
+    },
+    {
+      "audio/minimax": {
+        "color": "border-blue-500",
+        "title": "Audio/Minimax",
+        "description": "Audio related nodes using Minimax API",
+        "icon": "Music"
       }
     }
   ],
@@ -82,6 +91,15 @@
         "category": "video/minimax",
         "description": "Generate videos between two key frames using Minimax API.",
         "display_name": "Minimax First-Last Frame-to-Video"
+      }
+    },
+    {
+      "class_name": "MinimaxMusicGeneration",
+      "file_path": "minimax_music_generation.py",
+      "metadata": {
+        "category": "audio/minimax",
+        "description": "Generate music using Minimax music generation API.",
+        "display_name": "Minimax Music Generation"
       }
     }
   ]

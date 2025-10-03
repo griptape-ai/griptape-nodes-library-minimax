@@ -1,6 +1,6 @@
 # Minimax Nodes for Griptape
 
-A comprehensive node library for integrating Minimax's powerful AI generation APIs into Griptape Nodes workflows. Generate stunning images and videos using state-of-the-art AI models.
+A comprehensive node library for integrating Minimax's powerful AI generation APIs into Griptape Nodes workflows. Generate stunning images, videos, and music using state-of-the-art AI models.
 
 ## 📦 Installation
 
@@ -208,6 +208,38 @@ Image requirements for video generation nodes:
   - Morphing effects
   - Consistent video sequences
   - Animation interpolation
+
+### 🎵 Music Generation
+
+#### **Minimax Music Generation**
+
+Generate original music from text descriptions and lyrics using Minimax's music generation API.
+
+**Inputs:**
+- **Prompt** (str): Description of music style, mood, and scenario (10-300 characters)
+  - Example: "Pop, melancholic, perfect for a rainy night"
+- **Lyrics** (str): Song lyrics with optional structure tags (10-3000 characters)
+  - Use `\n` to separate lines
+  - Add structure tags: `[Intro]`, `[Verse]`, `[Chorus]`, `[Bridge]`, `[Outro]`
+- **Model** (str): Model selection (default: `music-1.5`)
+- **Audio Settings**:
+  - **Sample Rate** (int): Audio sampling rate (16000, 24000, 32000, 44100 Hz) - default: 44100
+  - **Bitrate** (int): Audio bitrate (32000, 64000, 128000, 256000 bps) - default: 128000
+  - **Format** (str): Output format (mp3, wav, pcm) - default: mp3
+
+**Outputs:**
+- **Audio URL** (AudioUrlArtifact): Generated music file
+- **Provider Response** (dict): Full API response
+
+**Use Cases:**
+- **Custom Songs**: Generate original music with specific lyrics
+  - Personalized songs for special occasions
+  - Demo tracks for songwriting
+  - Background music for videos
+- **Music Production**: Create music with specific moods
+  - Game soundtracks
+  - Podcast intros/outros
+  - Video background music
 
 ## 🔧 Advanced Features
 
