@@ -11,6 +11,7 @@ from typing import Any
 
 import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact, VideoUrlArtifact
+from PIL import Image
 
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
@@ -306,9 +307,6 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                 
                 # Validate format and dimensions using PIL
                 try:
-                    from PIL import Image
-                    from io import BytesIO
-                    
                     img = Image.open(BytesIO(image_bytes))
                     
                     # Validate format
@@ -504,20 +502,28 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                     if not mime_type.startswith('image/'):
                         mime_type = 'image/jpeg'
                     
-                    # Optionally detect with PIL for accuracy
+                    # Detect and convert unsupported formats with PIL
                     try:
-                        from PIL import Image
-                        from io import BytesIO
-                        
                         img = Image.open(BytesIO(image_bytes))
-                        format_to_mime = {
-                            'JPEG': 'image/jpeg',
-                            'PNG': 'image/png',
-                            'WEBP': 'image/webp'
-                        }
-                        detected_mime = format_to_mime.get(img.format)
-                        if detected_mime:
-                            mime_type = detected_mime
+                        
+                        # Convert unsupported formats (MPO, etc.) to JPEG
+                        if img.format not in ['JPEG', 'PNG', 'WEBP']:
+                            self._log(f"Converting {img.format} to JPEG for API compatibility")
+                            # Convert to RGB if needed (for formats like MPO)
+                            if img.mode not in ['RGB', 'L']:
+                                img = img.convert('RGB')
+                            # Save as JPEG to bytes
+                            output = BytesIO()
+                            img.save(output, format='JPEG', quality=95)
+                            image_bytes = output.getvalue()
+                            mime_type = "image/jpeg"
+                        else:
+                            format_to_mime = {
+                                'JPEG': 'image/jpeg',
+                                'PNG': 'image/png',
+                                'WEBP': 'image/webp'
+                            }
+                            mime_type = format_to_mime.get(img.format, 'image/jpeg')
                             self._log(f"Detected image format from downloaded image: {img.format} -> {mime_type}")
                     except Exception:
                         pass
@@ -543,7 +549,7 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                     
                     # Check if base64 already has data URI prefix
                     if base64_data.startswith('data:'):
-                        self._log(f"Using ImageArtifact.base64 (already has data URI)")
+                        self._log("Using ImageArtifact.base64 (already has data URI)")
                         return base64_data
                     
                     # Add data URI prefix
@@ -568,20 +574,30 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                 else:
                     raise ValueError("Unsupported ImageArtifact format")
                 
-                # Detect image format using PIL
+                # Detect image format and convert unsupported formats using PIL
                 mime_type = "image/jpeg"  # Default
                 try:
-                    from PIL import Image
-                    from io import BytesIO
-                    
                     img = Image.open(BytesIO(image_bytes))
-                    format_to_mime = {
-                        'JPEG': 'image/jpeg',
-                        'PNG': 'image/png',
-                        'WEBP': 'image/webp'
-                    }
-                    mime_type = format_to_mime.get(img.format, 'image/jpeg')
-                    self._log(f"Detected image format: {img.format} -> {mime_type}")
+                    
+                    # Convert unsupported formats (MPO, etc.) to JPEG
+                    if img.format not in ['JPEG', 'PNG', 'WEBP']:
+                        self._log(f"Converting {img.format} to JPEG for API compatibility")
+                        # Convert to RGB if needed (for formats like MPO)
+                        if img.mode not in ['RGB', 'L']:
+                            img = img.convert('RGB')
+                        # Save as JPEG to bytes
+                        output = BytesIO()
+                        img.save(output, format='JPEG', quality=95)
+                        image_bytes = output.getvalue()
+                        mime_type = "image/jpeg"
+                    else:
+                        format_to_mime = {
+                            'JPEG': 'image/jpeg',
+                            'PNG': 'image/png',
+                            'WEBP': 'image/webp'
+                        }
+                        mime_type = format_to_mime.get(img.format, 'image/jpeg')
+                        self._log(f"Detected image format: {img.format} -> {mime_type}")
                 except Exception as e:
                     self._log(f"Could not detect image format, using default jpeg: {e}")
                 
