@@ -33,7 +33,6 @@ MODEL_OPTIONS = [
 
 # Resolution options
 RESOLUTION_OPTIONS = [
-    "512P",
     "768P",
     "1080P"
 ]
@@ -218,6 +217,15 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                 ui_options={"hide_property": True},
             )
         )
+
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        """Handle parameter value changes and enforce constraints."""
+        if parameter.name == "resolution":
+            # 1080P only supports 6s duration
+            if value == "1080P":
+                self.set_parameter_value("duration", 6)
+        
+        return super().after_value_set(parameter, value)
 
     def _log(self, message: str) -> None:
         """Safe logging with exception suppression."""
