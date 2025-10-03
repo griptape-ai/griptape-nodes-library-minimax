@@ -551,10 +551,12 @@ class MinimaxImageToImage(DataNode):
         payload = {
             "prompt": params["prompt"],
             "model": params["model"],
-            "subject_reference": {
-                "type": params["subject_type"],
-                "image_file": reference_image_data,
-            },
+            "subject_reference": [
+                {
+                    "type": params["subject_type"],
+                    "image_file": reference_image_data,
+                }
+            ],
             "n": params["num_images"],
             "response_format": "url",
         }
