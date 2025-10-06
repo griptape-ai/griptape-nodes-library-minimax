@@ -202,7 +202,7 @@ class MinimaxImageToImage(DataNode):
             )
         )
         
-        # Number of images parameter (hidden)
+        # Number of images parameter
         self.add_parameter(
             Parameter(
                 name="num_images",
@@ -214,7 +214,7 @@ class MinimaxImageToImage(DataNode):
                 traits={Slider(min_val=1, max_val=9)},
                 ui_options={
                     "display_name": "Number of Images",
-                    "hide": True,
+                    "hide": False,
                 },
             )
         )
