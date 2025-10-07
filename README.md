@@ -8,7 +8,7 @@ A comprehensive node library for integrating Minimax's powerful AI generation AP
 
 - Griptape Nodes installed
 - Python 3.12 or higher
-- Minimax API key ([Get one here](https://platform.minimax.chat/))
+- Minimax API key ([Get one here](https://www.minimax.io/platform_overview))
 
 ### Install from Repository
 
