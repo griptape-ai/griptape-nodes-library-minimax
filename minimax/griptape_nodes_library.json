@@ -3,10 +3,12 @@
   "library_schema_version": "0.1.0",
   "settings": [
     {
-      "description": "Environment variables for storing secrets for new AI service's nodes",
-      "category": "nodes.Minimax",
+      "description": "API keys required by nodes in this library",
+      "category": "app_events.on_app_initialization_complete",
       "contents": {
-          "MINIMAX_API_KEY": "$MINIMAX_API_KEY"
+        "secrets_to_register": [
+          "MINIMAX_API_KEY"
+        ]
       }
     }
   ],
