@@ -12,6 +12,7 @@ from griptape.artifacts import VideoUrlArtifact
 
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 
 logger = logging.getLogger(__name__)
@@ -353,7 +354,7 @@ class MinimaxTextToVideo(DataNode):
 
     def _validate_api_key(self) -> str:
         """Validate and return the API key."""
-        api_key = self.get_config_value(service=self.SERVICE_NAME, value=self.API_KEY_NAME)
+        api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
             msg = f"{self.name} is missing {self.API_KEY_NAME}. Ensure it's set in the environment/config."
