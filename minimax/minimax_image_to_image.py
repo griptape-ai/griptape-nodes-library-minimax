@@ -15,6 +15,7 @@ from PIL import Image
 
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
@@ -438,8 +439,6 @@ class MinimaxImageToImage(DataNode):
 
     def _validate_api_key(self) -> str:
         """Validate and return the API key."""
-        from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-        
         api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
