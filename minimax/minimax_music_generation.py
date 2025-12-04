@@ -13,6 +13,7 @@ from griptape.artifacts import AudioUrlArtifact
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
@@ -349,7 +350,7 @@ class MinimaxMusicGeneration(DataNode):
                 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
                 
                 static_files_manager = GriptapeNodes.StaticFilesManager()
-                saved_url = static_files_manager.save_static_file(audio_bytes, filename)
+                saved_url = static_files_manager.save_static_file(audio_bytes, filename, ExistingFilePolicy.CREATE_NEW)
                 
                 # Create AudioUrlArtifact
                 self.parameter_output_values["audio_url"] = AudioUrlArtifact(

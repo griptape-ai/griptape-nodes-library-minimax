@@ -16,6 +16,7 @@ from PIL import Image
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
@@ -666,7 +667,7 @@ class MinimaxImageToImage(DataNode):
                 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
                 
                 static_files_manager = GriptapeNodes.StaticFilesManager()
-                saved_url = static_files_manager.save_static_file(image_bytes, filename)
+                saved_url = static_files_manager.save_static_file(image_bytes, filename, ExistingFilePolicy.CREATE_NEW)
                 
                 self._log(f"Saved image {index + 1} to static storage as {filename}")
                 return ImageUrlArtifact(value=saved_url, name=filename)
