@@ -20,6 +20,8 @@ from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
+from griptape_nodes.files.file import File, FileLoadError
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["MinimaxImageToImage"]
@@ -652,34 +654,22 @@ class MinimaxImageToImage(DataNode):
             self.parameter_output_values["image"] = saved_artifacts[0]
             self.parameter_output_values["images"] = saved_artifacts
 
-    def _save_image_from_url(self, image_url: str, index: int = 0) -> ImageUrlArtifact | None:
+    def _save_image_from_url(self, image_url: str, index: int = 0) -> ImageUrlArtifact:
         """Save image from URL to static storage."""
-        try:
-            self._log(f"Downloading image {index + 1} from URL")
-            
-            # Download image bytes
-            image_bytes = self._download_bytes_from_url(image_url)
-            if image_bytes:
-                # Generate filename with timestamp and index
-                filename = f"minimax_image_{int(time.time())}_{index}.png"
-                
-                # Save to static storage
-                from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-                
-                static_files_manager = GriptapeNodes.StaticFilesManager()
-                saved_url = static_files_manager.save_static_file(image_bytes, filename, ExistingFilePolicy.CREATE_NEW)
-                
-                self._log(f"Saved image {index + 1} to static storage as {filename}")
-                return ImageUrlArtifact(value=saved_url, name=filename)
-            else:
-                # Fallback to original URL if download fails
-                self._log(f"Using original image URL for image {index + 1} (download failed)")
-                return ImageUrlArtifact(value=image_url)
-                
-        except Exception as e:
-            self._log(f"Failed to save image {index + 1} from URL: {e}")
-            # Fallback to original URL
-            return ImageUrlArtifact(value=image_url)
+        self._log(f"Downloading image {index + 1} from URL")
+
+        # Download image bytes
+        image_bytes = File(image_url).read_bytes()
+
+        # Generate filename with timestamp and index
+        filename = f"minimax_image_{int(time.time())}_{index}.png"
+
+        # Save to static storage
+        static_files_manager = GriptapeNodes.StaticFilesManager()
+        saved_url = static_files_manager.save_static_file(image_bytes, filename, ExistingFilePolicy.CREATE_NEW)
+
+        self._log(f"Saved image {index + 1} to static storage as {filename}")
+        return ImageUrlArtifact(value=saved_url, name=filename)
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
@@ -687,13 +677,4 @@ class MinimaxImageToImage(DataNode):
         self.parameter_output_values["images"] = []
         self.parameter_output_values["provider_response"] = None
 
-    @staticmethod
-    def _download_bytes_from_url(url: str) -> bytes | None:
-        """Download image bytes from URL."""
-        try:
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            return resp.content
-        except Exception:
-            return None
 

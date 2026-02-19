@@ -17,6 +17,8 @@ from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
+from griptape_nodes.files.file import File, FileLoadError
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["MinimaxMusicGeneration"]
@@ -337,49 +339,28 @@ class MinimaxMusicGeneration(DataNode):
 
     def _save_audio_from_url(self, audio_url: str, audio_format: str) -> None:
         """Save audio from URL to static storage."""
-        try:
-            self._log("Downloading generated audio from URL")
-            
-            # Download audio bytes
-            audio_bytes = self._download_bytes_from_url(audio_url)
-            if audio_bytes:
-                # Generate filename with timestamp
-                filename = f"minimax_music_{int(time.time())}.{audio_format}"
-                
-                # Save to static storage
-                from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-                
-                static_files_manager = GriptapeNodes.StaticFilesManager()
-                saved_url = static_files_manager.save_static_file(audio_bytes, filename, ExistingFilePolicy.CREATE_NEW)
-                
-                # Create AudioUrlArtifact
-                self.parameter_output_values["audio_url"] = AudioUrlArtifact(
-                    value=saved_url, 
-                    name=filename
-                )
-                self._log(f"Saved audio to static storage as {filename}")
-            else:
-                # Fallback to original URL if download fails
-                self.parameter_output_values["audio_url"] = AudioUrlArtifact(value=audio_url)
-                self._log("Using original audio URL (download failed)")
-                
-        except Exception as e:
-            self._log(f"Failed to save audio from URL: {e}")
-            # Fallback to original URL
-            self.parameter_output_values["audio_url"] = AudioUrlArtifact(value=audio_url)
+        self._log("Downloading generated audio from URL")
+
+        # Download audio bytes
+        audio_bytes = File(audio_url).read_bytes()
+
+        # Generate filename with timestamp
+        filename = f"minimax_music_{int(time.time())}.{audio_format}"
+
+        # Save to static storage
+        static_files_manager = GriptapeNodes.StaticFilesManager()
+        saved_url = static_files_manager.save_static_file(audio_bytes, filename, ExistingFilePolicy.CREATE_NEW)
+
+        # Create AudioUrlArtifact
+        self.parameter_output_values["audio_url"] = AudioUrlArtifact(
+            value=saved_url,
+            name=filename
+        )
+        self._log(f"Saved audio to static storage as {filename}")
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
         self.parameter_output_values["audio_url"] = None
         self.parameter_output_values["provider_response"] = None
 
-    @staticmethod
-    def _download_bytes_from_url(url: str) -> bytes | None:
-        """Download audio bytes from URL."""
-        try:
-            resp = requests.get(url, timeout=120)
-            resp.raise_for_status()
-            return resp.content
-        except Exception:
-            return None
 
