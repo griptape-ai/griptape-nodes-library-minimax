@@ -464,9 +464,7 @@ class MinimaxImageToImage(DataNode):
                     self._log("Detected localhost URL, converting to base64")
                     # Download and convert to base64
                     try:
-                        response = requests.get(url, timeout=30)
-                        response.raise_for_status()
-                        image_bytes = response.content
+                        image_bytes = File(url).read_bytes()
                         
                         # Open image and check format
                         img = Image.open(BytesIO(image_bytes))

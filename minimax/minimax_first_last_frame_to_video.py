@@ -497,14 +497,8 @@ class MinimaxFirstLastFrameToVideo(DataNode):
             if url.startswith(('http://localhost', 'http://127.0.0.1', 'https://localhost', 'https://127.0.0.1')):
                 self._log(f"Converting localhost URL to base64: {url[:100]}...")
                 try:
-                    response = requests.get(url, timeout=30)
-                    response.raise_for_status()
-                    image_bytes = response.content
-                    
-                    # Detect format from response
-                    mime_type = response.headers.get('content-type', 'image/jpeg')
-                    if not mime_type.startswith('image/'):
-                        mime_type = 'image/jpeg'
+                    image_bytes = File(url).read_bytes()
+                    mime_type = 'image/jpeg'
                     
                     # Detect and convert unsupported formats with PIL
                     try:
