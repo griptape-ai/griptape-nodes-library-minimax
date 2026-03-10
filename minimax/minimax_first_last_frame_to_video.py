@@ -19,6 +19,8 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.options import Options
 
+from griptape_nodes.files.file import File, FileLoadError
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["MinimaxFirstLastFrameToVideo"]
@@ -495,14 +497,8 @@ class MinimaxFirstLastFrameToVideo(DataNode):
             if url.startswith(('http://localhost', 'http://127.0.0.1', 'https://localhost', 'https://127.0.0.1')):
                 self._log(f"Converting localhost URL to base64: {url[:100]}...")
                 try:
-                    response = requests.get(url, timeout=30)
-                    response.raise_for_status()
-                    image_bytes = response.content
-                    
-                    # Detect format from response
-                    mime_type = response.headers.get('content-type', 'image/jpeg')
-                    if not mime_type.startswith('image/'):
-                        mime_type = 'image/jpeg'
+                    image_bytes = File(url).read_bytes()
+                    mime_type = 'image/jpeg'
                     
                     # Detect and convert unsupported formats with PIL
                     try:
@@ -720,36 +716,24 @@ class MinimaxFirstLastFrameToVideo(DataNode):
 
     def _save_video_from_url(self, video_url: str) -> None:
         """Save video from URL to static storage."""
-        try:
-            self._log("Processing generated video URL")
-            
-            # Download video bytes
-            video_bytes = self._download_bytes_from_url(video_url)
-            if video_bytes:
-                # Generate filename with timestamp
-                filename = f"minimax_f2l_{int(time.time())}.mp4"
-                
-                # Save to static storage
-                from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-                
-                static_files_manager = GriptapeNodes.StaticFilesManager()
-                saved_url = static_files_manager.save_static_file(video_bytes, filename, ExistingFilePolicy.CREATE_NEW)
-                
-                # Create VideoUrlArtifact
-                self.parameter_output_values["video_url"] = VideoUrlArtifact(
-                    value=saved_url, 
-                    name=filename
-                )
-                self._log(f"Saved video to static storage as {filename}")
-            else:
-                # Fallback to original URL if download fails
-                self.parameter_output_values["video_url"] = VideoUrlArtifact(value=video_url)
-                self._log("Using original video URL (download failed)")
-                
-        except Exception as e:
-            self._log(f"Failed to save video from URL: {e}")
-            # Fallback to original URL
-            self.parameter_output_values["video_url"] = VideoUrlArtifact(value=video_url)
+        self._log("Processing generated video URL")
+
+        # Download video bytes
+        video_bytes = File(video_url).read_bytes()
+
+        # Generate filename with timestamp
+        filename = f"minimax_f2l_{int(time.time())}.mp4"
+
+        # Save to static storage
+        static_files_manager = GriptapeNodes.StaticFilesManager()
+        saved_url = static_files_manager.save_static_file(video_bytes, filename, ExistingFilePolicy.CREATE_NEW)
+
+        # Create VideoUrlArtifact
+        self.parameter_output_values["video_url"] = VideoUrlArtifact(
+            value=saved_url,
+            name=filename
+        )
+        self._log(f"Saved video to static storage as {filename}")
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
@@ -757,13 +741,4 @@ class MinimaxFirstLastFrameToVideo(DataNode):
         self.parameter_output_values["task_id"] = ""
         self.parameter_output_values["provider_response"] = None
 
-    @staticmethod
-    def _download_bytes_from_url(url: str) -> bytes | None:
-        """Download video bytes from URL."""
-        try:
-            resp = requests.get(url, timeout=120)  # Longer timeout for videos
-            resp.raise_for_status()
-            return resp.content
-        except Exception:
-            return None
 
