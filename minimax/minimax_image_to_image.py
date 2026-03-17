@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import json as _json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from io import BytesIO
@@ -13,8 +12,8 @@ import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
@@ -80,6 +79,8 @@ class MinimaxImageToImage(DataNode):
         super().__init__(**kwargs)
         self.category = "Image Generation"
         self.description = "Generate images using Minimax image-to-image API"
+        self._output_file = ProjectFileParameter(node=self, name="output_file", default_filename="minimax_image.png")
+        self._output_file.add_parameter()
 
         # Core prompt parameter
         self.add_parameter(
@@ -662,21 +663,17 @@ class MinimaxImageToImage(DataNode):
             self.parameter_output_values["images"] = saved_artifacts
 
     def _save_image_from_url(self, image_url: str, index: int = 0) -> ImageUrlArtifact:
-        """Save image from URL to static storage."""
+        """Save image from URL to project storage."""
         self._log(f"Downloading image {index + 1} from URL")
 
         # Download image bytes
         image_bytes = File(image_url).read_bytes()
 
-        # Generate filename with timestamp and index
-        filename = f"minimax_image_{int(time.time())}_{index}.png"
+        # Save to project storage
+        saved = self._output_file.build_file().write_bytes(image_bytes)
 
-        # Save to static storage
-        static_files_manager = GriptapeNodes.StaticFilesManager()
-        saved_url = static_files_manager.save_static_file(image_bytes, filename, ExistingFilePolicy.CREATE_NEW)
-
-        self._log(f"Saved image {index + 1} to static storage as {filename}")
-        return ImageUrlArtifact(value=saved_url, name=filename)
+        self._log(f"Saved image {index + 1} to project storage as {saved.location}")
+        return ImageUrlArtifact(value=saved.location, name=saved.location)
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
