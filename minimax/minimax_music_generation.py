@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from typing import Any
@@ -12,8 +11,8 @@ from griptape.artifacts import AudioUrlArtifact
 
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
@@ -66,7 +65,9 @@ class MinimaxMusicGeneration(DataNode):
         super().__init__(**kwargs)
         self.category = "Audio Generation"
         self.description = "Generate music using Minimax music generation API"
-        
+        self._output_file = ProjectFileParameter(node=self, name="output_file", default_filename="minimax_music.mp3")
+        self._output_file.add_parameter()
+
         # Prompt parameter
         self.add_parameter(
             Parameter(
@@ -338,25 +339,21 @@ class MinimaxMusicGeneration(DataNode):
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
     def _save_audio_from_url(self, audio_url: str, audio_format: str) -> None:
-        """Save audio from URL to static storage."""
+        """Save audio from URL to project storage."""
         self._log("Downloading generated audio from URL")
 
         # Download audio bytes
         audio_bytes = File(audio_url).read_bytes()
 
-        # Generate filename with timestamp
-        filename = f"minimax_music_{int(time.time())}.{audio_format}"
-
-        # Save to static storage
-        static_files_manager = GriptapeNodes.StaticFilesManager()
-        saved_url = static_files_manager.save_static_file(audio_bytes, filename, ExistingFilePolicy.CREATE_NEW)
+        # Save to project storage
+        saved = self._output_file.build_file().write_bytes(audio_bytes)
 
         # Create AudioUrlArtifact
         self.parameter_output_values["audio_url"] = AudioUrlArtifact(
-            value=saved_url,
-            name=filename
+            value=saved.location,
+            name=saved.location
         )
-        self._log(f"Saved audio to static storage as {filename}")
+        self._log(f"Saved audio to project storage as {saved.location}")
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
