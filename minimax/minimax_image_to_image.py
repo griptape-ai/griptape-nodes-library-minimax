@@ -11,16 +11,14 @@ from typing import Any
 
 import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
-from PIL import Image
-
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
-
-from griptape_nodes.files.file import File, FileLoadError
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +50,10 @@ SUBJECT_TYPE_OPTIONS = ["character"]
 
 class MinimaxImageToImage(DataNode):
     """Generate images using Minimax image-to-image API.
-    
+
     This node uses the Minimax API to generate images based on a reference image and text prompt.
     Perfect for portrait generation and character consistency.
-    
+
     Inputs:
         - prompt (str): Text description of the image (up to 1500 characters)
         - reference_image (ImageArtifact | ImageUrlArtifact): Reference image for subject
@@ -67,22 +65,22 @@ class MinimaxImageToImage(DataNode):
         - seed (int): Random seed for reproducibility (-1 for random)
         - num_images (int): Number of images to generate (1-9)
         - prompt_optimizer (bool): Automatically optimize prompt
-        
+
     Outputs:
         - image (ImageUrlArtifact): Generated image (single result)
         - images (list[ImageUrlArtifact]): All generated images (when num_images > 1)
         - provider_response (dict): Full API response
     """
-    
+
     SERVICE_NAME = "Minimax"
     API_KEY_NAME = "MINIMAX_API_KEY"
     API_BASE_URL = "https://api.minimax.io/v1/image_generation"
-    
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.category = "Image Generation"
         self.description = "Generate images using Minimax image-to-image API"
-        
+
         # Core prompt parameter
         self.add_parameter(
             Parameter(
@@ -98,7 +96,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         # Reference image parameter
         self.add_parameter(
             Parameter(
@@ -113,7 +111,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         # Model selection
         self.add_parameter(
             Parameter(
@@ -127,7 +125,7 @@ class MinimaxImageToImage(DataNode):
                 ui_options={"display_name": "Model"},
             )
         )
-        
+
         # Subject type (hidden by default, only "character" supported currently)
         self.add_parameter(
             Parameter(
@@ -144,7 +142,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         # Aspect ratio selection
         self.add_parameter(
             Parameter(
@@ -158,7 +156,7 @@ class MinimaxImageToImage(DataNode):
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
-        
+
         # Height parameter (hidden by default)
         self.add_parameter(
             Parameter(
@@ -175,7 +173,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         # Width parameter (hidden by default)
         self.add_parameter(
             Parameter(
@@ -192,7 +190,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         # Seed parameter
         self.add_parameter(
             Parameter(
@@ -205,7 +203,7 @@ class MinimaxImageToImage(DataNode):
                 ui_options={"display_name": "Seed"},
             )
         )
-        
+
         # Number of images parameter
         self.add_parameter(
             Parameter(
@@ -222,7 +220,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         # Prompt optimizer
         self.add_parameter(
             Parameter(
@@ -235,7 +233,7 @@ class MinimaxImageToImage(DataNode):
                 ui_options={"display_name": "Prompt Optimizer"},
             )
         )
-        
+
         # OUTPUTS
         self.add_parameter(
             Parameter(
@@ -248,7 +246,7 @@ class MinimaxImageToImage(DataNode):
                 ui_options={"is_full_width": True, "pulse_on_run": True},
             )
         )
-        
+
         # Multiple images output (hidden by default)
         self.add_parameter(
             Parameter(
@@ -264,7 +262,7 @@ class MinimaxImageToImage(DataNode):
                 },
             )
         )
-        
+
         self.add_parameter(
             Parameter(
                 name="provider_response",
@@ -285,13 +283,13 @@ class MinimaxImageToImage(DataNode):
             else:
                 self.hide_parameter_by_name("height")
                 self.hide_parameter_by_name("width")
-        
+
         if parameter.name == "num_images":
             if value > 1:
                 self.show_parameter_by_name("images")
             else:
                 self.hide_parameter_by_name("images")
-        
+
         return super().after_value_set(parameter, value)
 
     def _log(self, message: str) -> None:
@@ -302,14 +300,16 @@ class MinimaxImageToImage(DataNode):
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
         exceptions = []
-        
+
         # Validate prompt is provided
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
             exceptions.append(ValueError(f"{self.name}: Prompt is required"))
         elif len(prompt) > 1500:
-            exceptions.append(ValueError(f"{self.name}: Prompt must be 1500 characters or less (current: {len(prompt)} characters)"))
-        
+            exceptions.append(
+                ValueError(f"{self.name}: Prompt must be 1500 characters or less (current: {len(prompt)} characters)")
+            )
+
         # Validate reference image is provided
         reference_image = self.get_parameter_value("reference_image")
         if not reference_image:
@@ -319,40 +319,46 @@ class MinimaxImageToImage(DataNode):
             validation_errors = self._validate_reference_image(reference_image)
             if validation_errors:
                 exceptions.extend(validation_errors)
-        
+
         # Validate height and width if using custom dimensions
         aspect_ratio = self.get_parameter_value("aspect_ratio")
         if aspect_ratio == "Use height and width":
             height = self.get_parameter_value("height")
             width = self.get_parameter_value("width")
-            
+
             if height < 512 or height > 2048:
                 exceptions.append(ValueError(f"{self.name}: Height must be between 512 and 2048 (current: {height})"))
             elif height % 8 != 0:
                 exceptions.append(ValueError(f"{self.name}: Height must be a multiple of 8 (current: {height})"))
-            
+
             if width < 512 or width > 2048:
                 exceptions.append(ValueError(f"{self.name}: Width must be between 512 and 2048 (current: {width})"))
             elif width % 8 != 0:
                 exceptions.append(ValueError(f"{self.name}: Width must be a multiple of 8 (current: {width})"))
-            
+
             # Only image-01 supports custom dimensions
             model = self.get_parameter_value("model")
             if model != "image-01":
-                exceptions.append(ValueError(f"{self.name}: Custom height and width only supported by image-01 model (current model: {model})"))
-        
+                exceptions.append(
+                    ValueError(
+                        f"{self.name}: Custom height and width only supported by image-01 model (current model: {model})"
+                    )
+                )
+
         return exceptions if exceptions else None
 
     def _validate_reference_image(self, image_artifact: ImageArtifact | ImageUrlArtifact) -> list[Exception]:
         """Validate reference image format and size."""
         exceptions = []
-        
+
         try:
             # Get image bytes
             if isinstance(image_artifact, ImageArtifact):
-                if hasattr(image_artifact, 'base64') and image_artifact.base64:
-                    image_bytes = base64.b64decode(image_artifact.base64.split(',')[1] if ',' in image_artifact.base64 else image_artifact.base64)
-                elif hasattr(image_artifact, 'value') and hasattr(image_artifact.value, 'read'):
+                if hasattr(image_artifact, "base64") and image_artifact.base64:
+                    image_bytes = base64.b64decode(
+                        image_artifact.base64.split(",")[1] if "," in image_artifact.base64 else image_artifact.base64
+                    )
+                elif hasattr(image_artifact, "value") and hasattr(image_artifact.value, "read"):
                     image_artifact.value.seek(0)
                     image_bytes = image_artifact.value.read()
                     image_artifact.value.seek(0)
@@ -361,30 +367,36 @@ class MinimaxImageToImage(DataNode):
             elif isinstance(image_artifact, ImageUrlArtifact):
                 # For URL artifacts, we'll skip byte-level validation
                 # Just check if it's a localhost URL (which we'll convert to base64)
-                if hasattr(image_artifact, 'value') and isinstance(image_artifact.value, str):
-                    if 'localhost' in image_artifact.value or '127.0.0.1' in image_artifact.value:
+                if hasattr(image_artifact, "value") and isinstance(image_artifact.value, str):
+                    if "localhost" in image_artifact.value or "127.0.0.1" in image_artifact.value:
                         # Will be converted to base64, validation will happen then
                         return exceptions
                 return exceptions  # Skip validation for public URLs
             else:
                 return exceptions
-            
+
             # Check file size (< 10MB)
             if len(image_bytes) > 10 * 1024 * 1024:
-                exceptions.append(ValueError(f"{self.name}: Reference image must be less than 10MB (current: {len(image_bytes) / (1024 * 1024):.1f}MB)"))
-            
+                exceptions.append(
+                    ValueError(
+                        f"{self.name}: Reference image must be less than 10MB (current: {len(image_bytes) / (1024 * 1024):.1f}MB)"
+                    )
+                )
+
             # Check format (JPG, JPEG, PNG)
             try:
                 img = Image.open(BytesIO(image_bytes))
-                if img.format not in ['JPEG', 'PNG']:
-                    exceptions.append(ValueError(f"{self.name}: Reference image must be JPG, JPEG, or PNG (current: {img.format})"))
+                if img.format not in ["JPEG", "PNG"]:
+                    exceptions.append(
+                        ValueError(f"{self.name}: Reference image must be JPG, JPEG, or PNG (current: {img.format})")
+                    )
             except Exception as e:
                 exceptions.append(ValueError(f"{self.name}: Could not validate reference image format: {e}"))
-        
+
         except Exception as e:
             self._log(f"Error validating reference image: {e}")
             # Don't fail validation if we can't check, let the API handle it
-        
+
         return exceptions
 
     def process(self) -> AsyncResult[None]:
@@ -395,29 +407,29 @@ class MinimaxImageToImage(DataNode):
         """Main processing method for image generation."""
         # Set safe defaults first
         self._set_safe_defaults()
-        
+
         # Get parameters
         params = self._get_parameters()
-        
+
         # Validate API key
         api_key = self._validate_api_key()
-        
+
         # Prepare headers
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        
+
         # Get reference image data
         reference_image_data = self._get_image_data(params["reference_image"])
         if not reference_image_data:
             raise ValueError("Failed to process reference image")
-        
+
         # Submit request
         try:
             response_data = self._submit_request(params, headers, reference_image_data)
             if not response_data:
                 return
-            
+
             self._handle_response(response_data, params)
-            
+
         except Exception as e:
             self._log(f"Error in image generation: {e}")
             self._set_safe_defaults()
@@ -437,7 +449,7 @@ class MinimaxImageToImage(DataNode):
             "num_images": self.get_parameter_value("num_images") or 1,
             "prompt_optimizer": self.get_parameter_value("prompt_optimizer") or False,
         }
-        
+
         return params
 
     def _validate_api_key(self) -> str:
@@ -458,117 +470,114 @@ class MinimaxImageToImage(DataNode):
             # Handle ImageUrlArtifact
             if isinstance(image_artifact, ImageUrlArtifact):
                 url = image_artifact.value
-                
+
                 # Check if it's a localhost URL
-                if 'localhost' in url or '127.0.0.1' in url:
+                if "localhost" in url or "127.0.0.1" in url:
                     self._log("Detected localhost URL, converting to base64")
                     # Download and convert to base64
                     try:
                         image_bytes = File(url).read_bytes()
-                        
+
                         # Open image and check format
                         img = Image.open(BytesIO(image_bytes))
-                        
+
                         # Convert unsupported formats (MPO, etc.) to JPEG
-                        if img.format not in ['JPEG', 'PNG']:
+                        if img.format not in ["JPEG", "PNG"]:
                             self._log(f"Converting {img.format} to JPEG for API compatibility")
                             # Convert to RGB if needed (for formats like MPO)
-                            if img.mode not in ['RGB', 'L']:
-                                img = img.convert('RGB')
+                            if img.mode not in ["RGB", "L"]:
+                                img = img.convert("RGB")
                             # Save as JPEG to bytes
                             output = BytesIO()
-                            img.save(output, format='JPEG', quality=95)
+                            img.save(output, format="JPEG", quality=95)
                             image_bytes = output.getvalue()
                             mime_type = "image/jpeg"
                         else:
                             mime_type = f"image/{img.format.lower()}"
-                        
+
                         # Convert to base64 data URL
-                        b64_data = base64.b64encode(image_bytes).decode('utf-8')
+                        b64_data = base64.b64encode(image_bytes).decode("utf-8")
                         return f"data:{mime_type};base64,{b64_data}"
                     except Exception as e:
                         self._log(f"Failed to convert localhost URL to base64: {e}")
-                        raise ValueError(f"Failed to process localhost image URL: {e}")
+                        raise ValueError(f"Failed to process localhost image URL: {e}") from e
                 else:
                     # Public URL, return as-is
                     return url
-            
+
             # Handle ImageArtifact
             elif isinstance(image_artifact, ImageArtifact):
                 # Try using built-in base64 property first
-                if hasattr(image_artifact, 'base64') and image_artifact.base64:
+                if hasattr(image_artifact, "base64") and image_artifact.base64:
                     b64 = image_artifact.base64
-                    mime_type = getattr(image_artifact, 'mime_type', 'image/jpeg')
-                    
+                    mime_type = getattr(image_artifact, "mime_type", "image/jpeg")
+
                     # Check if it's already a data URL
-                    if b64.startswith('data:'):
+                    if b64.startswith("data:"):
                         return b64
                     else:
                         return f"data:{mime_type};base64,{b64}"
-                
+
                 # Fallback: manually extract and encode
-                elif hasattr(image_artifact, 'value') and hasattr(image_artifact.value, 'read'):
+                elif hasattr(image_artifact, "value") and hasattr(image_artifact.value, "read"):
                     image_artifact.value.seek(0)
                     image_bytes = image_artifact.value.read()
                     image_artifact.value.seek(0)
-                    
+
                     # Open image and check format
                     img = Image.open(BytesIO(image_bytes))
-                    
+
                     # Convert unsupported formats (MPO, etc.) to JPEG
-                    if img.format not in ['JPEG', 'PNG']:
+                    if img.format not in ["JPEG", "PNG"]:
                         self._log(f"Converting {img.format} to JPEG for API compatibility")
                         # Convert to RGB if needed (for formats like MPO)
-                        if img.mode not in ['RGB', 'L']:
-                            img = img.convert('RGB')
+                        if img.mode not in ["RGB", "L"]:
+                            img = img.convert("RGB")
                         # Save as JPEG to bytes
                         output = BytesIO()
-                        img.save(output, format='JPEG', quality=95)
+                        img.save(output, format="JPEG", quality=95)
                         image_bytes = output.getvalue()
                         mime_type = "image/jpeg"
                     else:
                         mime_type = f"image/{img.format.lower()}"
-                    
+
                     # Convert to base64
-                    b64_data = base64.b64encode(image_bytes).decode('utf-8')
+                    b64_data = base64.b64encode(image_bytes).decode("utf-8")
                     return f"data:{mime_type};base64,{b64_data}"
-            
+
             raise ValueError(f"Unsupported image artifact type: {type(image_artifact)}")
-            
+
         except Exception as e:
             self._log(f"Error processing image data: {e}")
             raise
 
-    def _submit_request(self, params: dict[str, Any], headers: dict[str, str], reference_image_data: str) -> dict[str, Any] | None:
+    def _submit_request(
+        self, params: dict[str, Any], headers: dict[str, str], reference_image_data: str
+    ) -> dict[str, Any] | None:
         """Submit the image generation request to Minimax API."""
         payload = self._build_payload(params, reference_image_data)
-        
+
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
-        
+
         try:
-            response = requests.post(
-                self.API_BASE_URL,
-                json=payload,
-                headers=headers,
-                timeout=DEFAULT_TIMEOUT
-            )
+            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
-            
+
             response_data = response.json()
             self._log("Received response from API")
-            
+
             # Check base_resp for errors
             base_resp = response_data.get("base_resp", {})
             status_code = base_resp.get("status_code")
-            
+
             if status_code != 0:
                 status_msg = base_resp.get("status_msg", "Unknown error")
                 self._log(f"API error: {status_code} - {status_msg}")
                 raise RuntimeError(f"Image generation failed: {status_msg} (code: {status_code})")
-            
+
             return response_data
-            
+
         except requests.RequestException as e:
             self._log(f"Request failed: {e}")
             msg = f"{self.name} request failed: {e}"
@@ -588,7 +597,7 @@ class MinimaxImageToImage(DataNode):
             "n": params["num_images"],
             "response_format": "url",
         }
-        
+
         # Handle aspect ratio or custom dimensions
         if params["aspect_ratio"] == "Use height and width":
             # Round to nearest multiple of 8
@@ -602,15 +611,15 @@ class MinimaxImageToImage(DataNode):
             if " " in aspect_ratio:
                 aspect_ratio = aspect_ratio.split(" ")[0]
             payload["aspect_ratio"] = aspect_ratio
-        
+
         # Add seed if not -1
         if params["seed"] != -1:
             payload["seed"] = params["seed"]
-        
+
         # Add prompt_optimizer if enabled
         if params["prompt_optimizer"]:
             payload["prompt_optimizer"] = True
-        
+
         return payload
 
     def _log_request(self, payload: dict[str, Any]) -> None:
@@ -623,30 +632,30 @@ class MinimaxImageToImage(DataNode):
                 for ref in sanitized_payload["subject_reference"]:
                     if "image_file" in ref and len(ref["image_file"]) > PROMPT_TRUNCATE_LENGTH:
                         ref["image_file"] = ref["image_file"][:PROMPT_TRUNCATE_LENGTH] + "..."
-            
+
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
     def _handle_response(self, response_data: dict[str, Any], params: dict[str, Any]) -> None:
         """Handle the API response and save images."""
         self.parameter_output_values["provider_response"] = response_data
-        
+
         # Extract image URLs
         data = response_data.get("data", {})
         image_urls = data.get("image_urls", [])
-        
+
         if not image_urls:
             self._log("No image URLs in response")
             return
-        
+
         self._log(f"Received {len(image_urls)} image URL(s)")
-        
+
         # Save all images
         saved_artifacts = []
         for idx, image_url in enumerate(image_urls):
             artifact = self._save_image_from_url(image_url, idx)
             if artifact:
                 saved_artifacts.append(artifact)
-        
+
         # Set outputs
         if saved_artifacts:
             self.parameter_output_values["image"] = saved_artifacts[0]
@@ -674,5 +683,3 @@ class MinimaxImageToImage(DataNode):
         self.parameter_output_values["image"] = None
         self.parameter_output_values["images"] = []
         self.parameter_output_values["provider_response"] = None
-
-
