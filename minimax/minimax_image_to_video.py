@@ -11,15 +11,13 @@ from typing import Any
 
 import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact, VideoUrlArtifact
-from PIL import Image
-
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-
-from griptape_nodes.files.file import File, FileLoadError
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -32,23 +30,12 @@ POLLING_INTERVAL = 10  # seconds (recommended by Minimax)
 MAX_POLLING_ATTEMPTS = 60  # 10 minutes max (60 * 10s)
 
 # Model options for Minimax image-to-video
-MODEL_OPTIONS = [
-    "MiniMax-Hailuo-02",
-    "I2V-01-Director",
-    "I2V-01-live",
-    "I2V-01"
-]
+MODEL_OPTIONS = ["MiniMax-Hailuo-02", "I2V-01-Director", "I2V-01-live", "I2V-01"]
 
 # Resolution options based on model
-RESOLUTION_OPTIONS_HAILUO = [
-    "512P",
-    "768P",
-    "1080P"
-]
+RESOLUTION_OPTIONS_HAILUO = ["512P", "768P", "1080P"]
 
-RESOLUTION_OPTIONS_OTHER = [
-    "720P"
-]
+RESOLUTION_OPTIONS_OTHER = ["720P"]
 
 # Duration options
 DURATION_OPTIONS = [6, 10]
@@ -56,10 +43,10 @@ DURATION_OPTIONS = [6, 10]
 
 class MinimaxImageToVideo(DataNode):
     """Generate videos using Minimax image-to-video API.
-    
+
     This node uses the Minimax API to generate videos from an image and text prompt.
     The process involves submitting a task, polling for completion, and retrieving results.
-    
+
     Inputs:
         - first_frame_image (ImageArtifact | ImageUrlArtifact): Starting frame image
         - prompt (str): Text description of the video motion (up to 2000 characters)
@@ -68,22 +55,22 @@ class MinimaxImageToVideo(DataNode):
         - resolution (str): Video resolution (512P/768P/1080P for Hailuo-02, 720P for others)
         - prompt_optimizer (bool): Automatically optimize prompt (default: True)
         - fast_pretreatment (bool): Reduce optimization time for Hailuo-02 (default: False)
-        
+
     Outputs:
         - video_url (VideoUrlArtifact): Generated video as URL artifact
         - task_id (str): Task ID from the API
         - provider_response (dict): Full API response
     """
-    
+
     SERVICE_NAME = "Minimax"
     API_KEY_NAME = "MINIMAX_API_KEY"
     API_BASE_URL = "https://api.minimax.io/v1/video_generation"
-    
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.category = "Video Generation"
         self.description = "Generate videos using Minimax image-to-video API"
-        
+
         # First frame image parameter
         self.add_parameter(
             Parameter(
@@ -98,7 +85,7 @@ class MinimaxImageToVideo(DataNode):
                 },
             )
         )
-        
+
         # Core prompt parameter
         self.add_parameter(
             Parameter(
@@ -114,7 +101,7 @@ class MinimaxImageToVideo(DataNode):
                 },
             )
         )
-        
+
         # Model selection
         self.add_parameter(
             Parameter(
@@ -128,7 +115,7 @@ class MinimaxImageToVideo(DataNode):
                 ui_options={"display_name": "Model"},
             )
         )
-        
+
         # Duration selection
         duration_param = Parameter(
             name="duration",
@@ -141,7 +128,7 @@ class MinimaxImageToVideo(DataNode):
             ui_options={"display_name": "Duration (seconds)"},
         )
         self.add_parameter(duration_param)
-        
+
         # Resolution selection
         resolution_param = Parameter(
             name="resolution",
@@ -154,7 +141,7 @@ class MinimaxImageToVideo(DataNode):
             ui_options={"display_name": "Resolution"},
         )
         self.add_parameter(resolution_param)
-        
+
         # Prompt optimizer
         self.add_parameter(
             Parameter(
@@ -167,7 +154,7 @@ class MinimaxImageToVideo(DataNode):
                 ui_options={"display_name": "Prompt Optimizer"},
             )
         )
-        
+
         # Fast pretreatment (only for MiniMax-Hailuo-02)
         self.add_parameter(
             Parameter(
@@ -179,11 +166,11 @@ class MinimaxImageToVideo(DataNode):
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 ui_options={
                     "display_name": "Fast Pretreatment",
-                    "hide": True  # Hidden by default, shown for Hailuo-02
+                    "hide": True,  # Hidden by default, shown for Hailuo-02
                 },
             )
         )
-        
+
         # OUTPUTS
         self.add_parameter(
             Parameter(
@@ -196,7 +183,7 @@ class MinimaxImageToVideo(DataNode):
                 ui_options={"is_full_width": True, "pulse_on_run": True},
             )
         )
-        
+
         self.add_parameter(
             Parameter(
                 name="task_id",
@@ -206,7 +193,7 @@ class MinimaxImageToVideo(DataNode):
                 ui_options={"hide_property": True},
             )
         )
-        
+
         self.add_parameter(
             Parameter(
                 name="provider_response",
@@ -228,7 +215,7 @@ class MinimaxImageToVideo(DataNode):
                 resolution_param = self.get_parameter_by_name("resolution")
                 if resolution_param:
                     for child in resolution_param.children:
-                        if hasattr(child, 'choices'):
+                        if hasattr(child, "choices"):
                             child.choices = RESOLUTION_OPTIONS_HAILUO
                             break
             else:
@@ -238,19 +225,19 @@ class MinimaxImageToVideo(DataNode):
                 resolution_param = self.get_parameter_by_name("resolution")
                 if resolution_param:
                     for child in resolution_param.children:
-                        if hasattr(child, 'choices'):
+                        if hasattr(child, "choices"):
                             child.choices = RESOLUTION_OPTIONS_OTHER
                             break
                     # Set default to 720P for other models
                     self.set_parameter_value("resolution", "720P")
-        
+
         if parameter.name == "duration" and value == 10:
             # 10s only available for Hailuo-02 at 512P/768P
             model = self.get_parameter_value("model")
             if model != "MiniMax-Hailuo-02":
                 # Reset to 6s if not Hailuo-02
                 self.set_parameter_value("duration", 6)
-        
+
         return super().after_value_set(parameter, value)
 
     def _log(self, message: str) -> None:
@@ -261,7 +248,7 @@ class MinimaxImageToVideo(DataNode):
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
         exceptions = []
-        
+
         # Validate first frame image is provided
         first_frame_image = self.get_parameter_value("first_frame_image")
         if not first_frame_image:
@@ -271,110 +258,126 @@ class MinimaxImageToVideo(DataNode):
             image_validation_errors = self._validate_image(first_frame_image)
             if image_validation_errors:
                 exceptions.extend(image_validation_errors)
-        
+
         # Validate prompt
         prompt = self.get_parameter_value("prompt")
         if prompt and len(prompt) > 2000:
-            exceptions.append(ValueError(f"{self.name}: Prompt must be 2000 characters or less (current: {len(prompt)} characters)"))
-        
+            exceptions.append(
+                ValueError(f"{self.name}: Prompt must be 2000 characters or less (current: {len(prompt)} characters)")
+            )
+
         # Validate duration and resolution compatibility
         model = self.get_parameter_value("model")
         duration = self.get_parameter_value("duration")
         resolution = self.get_parameter_value("resolution")
-        
+
         if duration == 10:
             if model != "MiniMax-Hailuo-02":
                 exceptions.append(ValueError(f"{self.name}: 10s duration only supported by MiniMax-Hailuo-02 model"))
             elif resolution == "1080P":
                 exceptions.append(ValueError(f"{self.name}: 10s duration not supported with 1080P resolution"))
-        
+
         if model == "MiniMax-Hailuo-02":
             if resolution not in RESOLUTION_OPTIONS_HAILUO:
-                exceptions.append(ValueError(f"{self.name}: Resolution {resolution} not supported for MiniMax-Hailuo-02"))
+                exceptions.append(
+                    ValueError(f"{self.name}: Resolution {resolution} not supported for MiniMax-Hailuo-02")
+                )
         else:
             if resolution != "720P":
                 exceptions.append(ValueError(f"{self.name}: Only 720P resolution supported for {model}"))
-        
+
         # Validate first_frame_image requirement for specific models
         if model in ["I2V-01", "I2V-01-Director", "I2V-01-live"]:
             if not first_frame_image:
                 exceptions.append(ValueError(f"{self.name}: First frame image is required for {model}"))
         elif model == "MiniMax-Hailuo-02" and resolution == "512P":
             if not first_frame_image:
-                exceptions.append(ValueError(f"{self.name}: First frame image is required for MiniMax-Hailuo-02 at 512P"))
-        
+                exceptions.append(
+                    ValueError(f"{self.name}: First frame image is required for MiniMax-Hailuo-02 at 512P")
+                )
+
         return exceptions if exceptions else None
-    
+
     def _validate_image(self, image_artifact: ImageArtifact | ImageUrlArtifact) -> list[Exception]:
         """Validate image requirements: format, size, dimensions, aspect ratio."""
         exceptions = []
-        
+
         try:
             # For ImageUrlArtifact, we can't easily validate without downloading
             # The API will validate it, so we'll skip detailed checks
             if isinstance(image_artifact, ImageUrlArtifact):
                 return exceptions
-            
+
             # For ImageArtifact, validate format, size, and dimensions
             if isinstance(image_artifact, ImageArtifact):
                 # Get image bytes
                 image_bytes = None
-                if hasattr(image_artifact, 'value') and hasattr(image_artifact.value, 'read'):
+                if hasattr(image_artifact, "value") and hasattr(image_artifact.value, "read"):
                     image_artifact.value.seek(0)
                     image_bytes = image_artifact.value.read()
                     image_artifact.value.seek(0)  # Reset for later use
-                elif hasattr(image_artifact, 'data'):
+                elif hasattr(image_artifact, "data"):
                     if isinstance(image_artifact.data, bytes):
                         image_bytes = image_artifact.data
-                    elif hasattr(image_artifact.data, 'read'):
+                    elif hasattr(image_artifact.data, "read"):
                         image_artifact.data.seek(0)
                         image_bytes = image_artifact.data.read()
                         image_artifact.data.seek(0)  # Reset for later use
-                
+
                 if not image_bytes:
                     return exceptions  # Can't validate without bytes
-                
+
                 # Validate size (< 20MB)
                 size_mb = len(image_bytes) / (1024 * 1024)
                 if size_mb >= 20:
-                    exceptions.append(ValueError(f"{self.name}: Image size must be less than 20MB (current: {size_mb:.1f}MB)"))
-                
+                    exceptions.append(
+                        ValueError(f"{self.name}: Image size must be less than 20MB (current: {size_mb:.1f}MB)")
+                    )
+
                 # Validate format and dimensions using PIL
                 try:
                     img = Image.open(BytesIO(image_bytes))
-                    
+
                     # Validate format
-                    if img.format not in ['JPEG', 'PNG', 'WEBP']:
-                        exceptions.append(ValueError(f"{self.name}: Image format must be JPG, JPEG, PNG, or WebP (current: {img.format})"))
-                    
+                    if img.format not in ["JPEG", "PNG", "WEBP"]:
+                        exceptions.append(
+                            ValueError(
+                                f"{self.name}: Image format must be JPG, JPEG, PNG, or WebP (current: {img.format})"
+                            )
+                        )
+
                     # Validate dimensions
                     width, height = img.size
                     short_edge = min(width, height)
-                    
+
                     if short_edge <= 300:
-                        exceptions.append(ValueError(f"{self.name}: Image short edge must be > 300px (current: {short_edge}px)"))
-                    
+                        exceptions.append(
+                            ValueError(f"{self.name}: Image short edge must be > 300px (current: {short_edge}px)")
+                        )
+
                     # Validate aspect ratio (between 2:5 and 5:2)
                     aspect_ratio = width / height
                     min_ratio = 2 / 5  # 0.4
                     max_ratio = 5 / 2  # 2.5
-                    
+
                     if aspect_ratio < min_ratio or aspect_ratio > max_ratio:
-                        exceptions.append(ValueError(
-                            f"{self.name}: Image aspect ratio must be between 2:5 and 5:2 "
-                            f"(current: {width}x{height} = {aspect_ratio:.2f})"
-                        ))
-                    
+                        exceptions.append(
+                            ValueError(
+                                f"{self.name}: Image aspect ratio must be between 2:5 and 5:2 "
+                                f"(current: {width}x{height} = {aspect_ratio:.2f})"
+                            )
+                        )
+
                 except ImportError:
                     self._log("PIL not available for image validation")
                     # If PIL is not available, skip validation
                 except Exception as e:
                     self._log(f"Error validating image: {e}")
                     # Don't fail validation if we can't check the image
-        
+
         except Exception as e:
             self._log(f"Error in image validation: {e}")
-        
+
         return exceptions
 
     def process(self) -> AsyncResult[None]:
@@ -386,45 +389,42 @@ class MinimaxImageToVideo(DataNode):
         try:
             # Get parameters
             params = self._get_parameters()
-            
+
             # Validate API key
             api_key = self._validate_api_key()
-            
+
             # Prepare headers
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
             # Submit task and get task ID
             task_response = self._submit_task(params, headers)
             if not task_response:
                 return
-                
+
             task_id = task_response.get("task_id")
             if not task_id:
                 self._log("No task_id in response")
                 self._set_safe_defaults()
                 return
-                
+
             self.parameter_output_values["task_id"] = task_id
             self._log(f"Task submitted successfully: {task_id}")
-            
+
             # Poll for completion and get file_id
             file_id = self._poll_for_completion(task_id, headers)
             if not file_id:
                 return
-            
+
             self._log(f"Task succeeded, File ID: {file_id}")
-            
+
             # Retrieve video file from file_id
             video_url = self._retrieve_video_file(file_id, headers)
             if not video_url:
                 return
-                
+
             # Save the video
             self._save_video_from_url(video_url)
-            
+
         except Exception as e:
             self._log(f"Error in video generation: {e}")
             self._set_safe_defaults()
@@ -438,10 +438,12 @@ class MinimaxImageToVideo(DataNode):
             "model": self.get_parameter_value("model") or "MiniMax-Hailuo-02",
             "duration": self.get_parameter_value("duration") or 6,
             "resolution": self.get_parameter_value("resolution") or "768P",
-            "prompt_optimizer": self.get_parameter_value("prompt_optimizer") if self.get_parameter_value("prompt_optimizer") is not None else True,
+            "prompt_optimizer": self.get_parameter_value("prompt_optimizer")
+            if self.get_parameter_value("prompt_optimizer") is not None
+            else True,
             "fast_pretreatment": self.get_parameter_value("fast_pretreatment") or False,
         }
-        
+
         return params
 
     def _validate_api_key(self) -> str:
@@ -456,23 +458,18 @@ class MinimaxImageToVideo(DataNode):
     def _submit_task(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
         """Submit the video generation task to Minimax API."""
         payload = self._build_payload(params)
-        
+
         self._log("Submitting image-to-video generation task to Minimax API")
         self._log_request(payload)
-        
+
         try:
-            response = requests.post(
-                self.API_BASE_URL,
-                json=payload,
-                headers=headers,
-                timeout=DEFAULT_TIMEOUT
-            )
+            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
-            
+
             response_data = response.json()
             self._log(f"Task submission response: {_json.dumps(response_data, indent=2)}")
             return response_data
-            
+
         except requests.RequestException as e:
             self._log(f"Task submission failed: {e}")
             msg = f"{self.name} task submission failed: {e}"
@@ -489,28 +486,28 @@ class MinimaxImageToVideo(DataNode):
             "duration": params["duration"],
             "resolution": params["resolution"],
         }
-        
+
         # Add prompt if provided
         if params["prompt"]:
             payload["prompt"] = params["prompt"]
-        
+
         # Add first_frame_image based on model requirements
         # Required for: I2V models (always), Hailuo-02 at 512P
-        # Optional for: Hailuo-02 at other resolutions  
+        # Optional for: Hailuo-02 at other resolutions
         if params["first_frame_image"]:
             image_data = self._get_image_data(params["first_frame_image"])
             if image_data:
                 payload["first_frame_image"] = image_data
                 self._log(f"Including first_frame_image for model {params['model']} at {params['resolution']}")
-        
+
         # Add optional parameters
         if params["prompt_optimizer"] is not None:
             payload["prompt_optimizer"] = params["prompt_optimizer"]
-            
+
         # Only add fast_pretreatment for MiniMax-Hailuo-02 when prompt_optimizer is enabled
         if params["model"] == "MiniMax-Hailuo-02" and params["prompt_optimizer"] and params["fast_pretreatment"]:
             payload["fast_pretreatment"] = True
-        
+
         return payload
 
     def _get_image_data(self, image_artifact: ImageArtifact | ImageUrlArtifact) -> str:
@@ -518,78 +515,74 @@ class MinimaxImageToVideo(DataNode):
         # For ImageUrlArtifact, check if it's a public URL or localhost
         if isinstance(image_artifact, ImageUrlArtifact):
             url = image_artifact.value
-            
+
             # If it's a localhost URL, download and convert to base64
-            if url.startswith(('http://localhost', 'http://127.0.0.1', 'https://localhost', 'https://127.0.0.1')):
+            if url.startswith(("http://localhost", "http://127.0.0.1", "https://localhost", "https://127.0.0.1")):
                 self._log(f"Converting localhost URL to base64: {url[:100]}...")
                 try:
                     image_bytes = File(url).read_bytes()
-                    mime_type = 'image/jpeg'
-                    
+                    mime_type = "image/jpeg"
+
                     # Detect and convert unsupported formats with PIL
                     try:
                         img = Image.open(BytesIO(image_bytes))
-                        
+
                         # Convert unsupported formats (MPO, etc.) to JPEG
-                        if img.format not in ['JPEG', 'PNG', 'WEBP']:
+                        if img.format not in ["JPEG", "PNG", "WEBP"]:
                             self._log(f"Converting {img.format} to JPEG for API compatibility")
                             # Convert to RGB if needed (for formats like MPO)
-                            if img.mode not in ['RGB', 'L']:
-                                img = img.convert('RGB')
+                            if img.mode not in ["RGB", "L"]:
+                                img = img.convert("RGB")
                             # Save as JPEG to bytes
                             output = BytesIO()
-                            img.save(output, format='JPEG', quality=95)
+                            img.save(output, format="JPEG", quality=95)
                             image_bytes = output.getvalue()
                             mime_type = "image/jpeg"
                         else:
-                            format_to_mime = {
-                                'JPEG': 'image/jpeg',
-                                'PNG': 'image/png',
-                                'WEBP': 'image/webp'
-                            }
-                            mime_type = format_to_mime.get(img.format, 'image/jpeg')
+                            format_to_mime = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+                            mime_type = format_to_mime.get(img.format, "image/jpeg")
                             self._log(f"Detected image format from downloaded image: {img.format} -> {mime_type}")
                     except Exception:
                         pass
-                    
-                    base64_data = base64.b64encode(image_bytes).decode('utf-8')
+
+                    base64_data = base64.b64encode(image_bytes).decode("utf-8")
                     return f"data:{mime_type};base64,{base64_data}"
-                    
+
                 except Exception as e:
                     self._log(f"Failed to download localhost image: {e}")
-                    raise ValueError(f"Failed to download image from localhost URL: {e}")
-            
+                    raise ValueError(f"Failed to download image from localhost URL: {e}") from e
+
             # For public URLs, use directly
             self._log(f"Using public URL: {url[:100]}...")
             return url
-        
+
         # If it's an ImageArtifact, convert to base64 data URI
         if isinstance(image_artifact, ImageArtifact):
             try:
                 # Use the .base64 property if available (preferred method)
-                if hasattr(image_artifact, 'base64') and hasattr(image_artifact, 'mime_type'):
+                if hasattr(image_artifact, "base64") and hasattr(image_artifact, "mime_type"):
                     base64_data = image_artifact.base64
                     mime_type = image_artifact.mime_type
-                    
+
                     # Check if base64 already has data URI prefix
-                    if base64_data.startswith('data:'):
+                    if base64_data.startswith("data:"):
                         self._log("Using ImageArtifact.base64 (already has data URI)")
                         return base64_data
-                    
+
                     # Add data URI prefix
                     self._log(f"Using ImageArtifact.base64 with mime_type: {mime_type}")
                     return f"data:{mime_type};base64,{base64_data}"
-                
+
                 # Fallback: manually extract bytes and encode
                 self._log("Falling back to manual base64 encoding")
-                if hasattr(image_artifact, 'value') and hasattr(image_artifact.value, 'read'):
+                if hasattr(image_artifact, "value") and hasattr(image_artifact.value, "read"):
                     image_artifact.value.seek(0)
                     image_bytes = image_artifact.value.read()
                     image_artifact.value.seek(0)  # Reset for validation
-                elif hasattr(image_artifact, 'data'):
+                elif hasattr(image_artifact, "data"):
                     if isinstance(image_artifact.data, bytes):
                         image_bytes = image_artifact.data
-                    elif hasattr(image_artifact.data, 'read'):
+                    elif hasattr(image_artifact.data, "read"):
                         image_artifact.data.seek(0)
                         image_bytes = image_artifact.data.read()
                         image_artifact.data.seek(0)  # Reset for validation
@@ -597,42 +590,38 @@ class MinimaxImageToVideo(DataNode):
                         raise ValueError("Unsupported ImageArtifact data format")
                 else:
                     raise ValueError("Unsupported ImageArtifact format")
-                
+
                 # Detect image format and convert unsupported formats using PIL
                 mime_type = "image/jpeg"  # Default
                 try:
                     img = Image.open(BytesIO(image_bytes))
-                    
+
                     # Convert unsupported formats (MPO, etc.) to JPEG
-                    if img.format not in ['JPEG', 'PNG', 'WEBP']:
+                    if img.format not in ["JPEG", "PNG", "WEBP"]:
                         self._log(f"Converting {img.format} to JPEG for API compatibility")
                         # Convert to RGB if needed (for formats like MPO)
-                        if img.mode not in ['RGB', 'L']:
-                            img = img.convert('RGB')
+                        if img.mode not in ["RGB", "L"]:
+                            img = img.convert("RGB")
                         # Save as JPEG to bytes
                         output = BytesIO()
-                        img.save(output, format='JPEG', quality=95)
+                        img.save(output, format="JPEG", quality=95)
                         image_bytes = output.getvalue()
                         mime_type = "image/jpeg"
                     else:
-                        format_to_mime = {
-                            'JPEG': 'image/jpeg',
-                            'PNG': 'image/png',
-                            'WEBP': 'image/webp'
-                        }
-                        mime_type = format_to_mime.get(img.format, 'image/jpeg')
+                        format_to_mime = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}
+                        mime_type = format_to_mime.get(img.format, "image/jpeg")
                         self._log(f"Detected image format: {img.format} -> {mime_type}")
                 except Exception as e:
                     self._log(f"Could not detect image format, using default jpeg: {e}")
-                
+
                 # Convert to base64 data URI with correct MIME type
-                base64_data = base64.b64encode(image_bytes).decode('utf-8')
+                base64_data = base64.b64encode(image_bytes).decode("utf-8")
                 return f"data:{mime_type};base64,{base64_data}"
-                
+
             except Exception as e:
                 self._log(f"Error converting ImageArtifact to base64: {e}")
-                raise ValueError(f"Failed to process image artifact: {e}")
-        
+                raise ValueError(f"Failed to process image artifact: {e}") from e
+
         raise ValueError("Unsupported artifact type for first_frame_image")
 
     def _log_request(self, payload: dict[str, Any]) -> None:
@@ -641,43 +630,42 @@ class MinimaxImageToVideo(DataNode):
             # Log payload size
             if "first_frame_image" in payload:
                 image_data_len = len(payload.get("first_frame_image", ""))
-                self._log(f"first_frame_image data length: {image_data_len} chars (~{image_data_len/1024:.1f}KB)")
-            
+                self._log(f"first_frame_image data length: {image_data_len} chars (~{image_data_len / 1024:.1f}KB)")
+
             sanitized_payload = deepcopy(payload)
             # Truncate long prompts for logging
             if "prompt" in sanitized_payload and len(sanitized_payload["prompt"]) > PROMPT_TRUNCATE_LENGTH:
                 sanitized_payload["prompt"] = sanitized_payload["prompt"][:PROMPT_TRUNCATE_LENGTH] + "..."
             # Truncate base64 image data
             if "first_frame_image" in sanitized_payload and sanitized_payload["first_frame_image"].startswith("data:"):
-                sanitized_payload["first_frame_image"] = sanitized_payload["first_frame_image"][:100] + "...[base64 data truncated]"
-            
+                sanitized_payload["first_frame_image"] = (
+                    sanitized_payload["first_frame_image"][:100] + "...[base64 data truncated]"
+                )
+
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
     def _poll_for_completion(self, task_id: str, headers: dict[str, str]) -> str | None:
         """Poll the API for task completion and return file_id."""
         self._log(f"Starting to poll for task completion: {task_id}")
-        
+
         query_url = "https://api.minimax.io/v1/query/video_generation"
-        
+
         for attempt in range(MAX_POLLING_ATTEMPTS):
             # Recommended polling interval to avoid unnecessary server load
             time.sleep(POLLING_INTERVAL)
-            
+
             try:
                 # Query task status with task_id as query parameter
                 response = requests.get(
-                    query_url, 
-                    headers=headers, 
-                    params={"task_id": task_id},
-                    timeout=DEFAULT_TIMEOUT
+                    query_url, headers=headers, params={"task_id": task_id}, timeout=DEFAULT_TIMEOUT
                 )
                 response.raise_for_status()
-                
+
                 status_data = response.json()
                 status = status_data.get("status", "unknown")
-                
+
                 self._log(f"Polling attempt {attempt + 1}: Status = {status}")
-                
+
                 if status == "Success":
                     self._log("Task completed successfully")
                     file_id = status_data.get("file_id")
@@ -693,14 +681,14 @@ class MinimaxImageToVideo(DataNode):
                 else:
                     # Task still in progress (Processing, Pending, etc.)
                     continue
-                    
+
             except requests.RequestException as e:
                 self._log(f"Polling request failed (attempt {attempt + 1}): {e}")
                 if attempt < MAX_POLLING_ATTEMPTS - 1:
                     continue
                 else:
-                    raise RuntimeError(f"Polling failed after {MAX_POLLING_ATTEMPTS} attempts: {e}")
-        
+                    raise RuntimeError(f"Polling failed after {MAX_POLLING_ATTEMPTS} attempts: {e}") from e
+
         # If we get here, we've exceeded max attempts
         raise RuntimeError(f"Task did not complete within {MAX_POLLING_ATTEMPTS * POLLING_INTERVAL} seconds")
 
@@ -708,31 +696,26 @@ class MinimaxImageToVideo(DataNode):
         """Retrieve video download URL from file_id."""
         try:
             self._log(f"Retrieving video file for file_id: {file_id}")
-            
+
             retrieve_url = "https://api.minimax.io/v1/files/retrieve"
-            response = requests.get(
-                retrieve_url,
-                headers=headers,
-                params={"file_id": file_id},
-                timeout=DEFAULT_TIMEOUT
-            )
+            response = requests.get(retrieve_url, headers=headers, params={"file_id": file_id}, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
-            
+
             response_data = response.json()
             self.parameter_output_values["provider_response"] = response_data
-            
+
             # Extract download URL
             download_url = response_data.get("file", {}).get("download_url")
             if not download_url:
                 self._log("No download_url found in file retrieval response")
                 return None
-                
+
             self._log(f"Retrieved download URL: {download_url[:100]}...")
             return download_url
-            
+
         except requests.RequestException as e:
             self._log(f"File retrieval failed: {e}")
-            raise RuntimeError(f"Failed to retrieve video file: {e}")
+            raise RuntimeError(f"Failed to retrieve video file: {e}") from e
 
     def _save_video_from_url(self, video_url: str) -> None:
         """Save video from URL to static storage."""
@@ -749,10 +732,7 @@ class MinimaxImageToVideo(DataNode):
         saved_url = static_files_manager.save_static_file(video_bytes, filename, ExistingFilePolicy.CREATE_NEW)
 
         # Create VideoUrlArtifact
-        self.parameter_output_values["video_url"] = VideoUrlArtifact(
-            value=saved_url,
-            name=filename
-        )
+        self.parameter_output_values["video_url"] = VideoUrlArtifact(value=saved_url, name=filename)
         self._log(f"Saved video to static storage as {filename}")
 
     def _set_safe_defaults(self) -> None:
@@ -760,5 +740,3 @@ class MinimaxImageToVideo(DataNode):
         self.parameter_output_values["video_url"] = None
         self.parameter_output_values["task_id"] = ""
         self.parameter_output_values["provider_response"] = None
-
-

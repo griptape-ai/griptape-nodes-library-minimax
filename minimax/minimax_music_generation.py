@@ -9,15 +9,12 @@ from typing import Any
 
 import requests
 from griptape.artifacts import AudioUrlArtifact
-
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-from griptape_nodes.traits.slider import Slider
-
-from griptape_nodes.files.file import File, FileLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +39,9 @@ AUDIO_FORMAT_OPTIONS = ["mp3", "wav", "pcm"]
 
 class MinimaxMusicGeneration(DataNode):
     """Generate music using Minimax music generation API.
-    
+
     This node uses the Minimax API to generate music from text prompts and lyrics.
-    
+
     Inputs:
         - prompt (str): Description of the music style, mood, and scenario (10-300 characters)
         - lyrics (str): Lyrics of the song with optional structure tags (10-3000 characters)
@@ -52,21 +49,21 @@ class MinimaxMusicGeneration(DataNode):
         - sample_rate (int): Audio sampling rate (16000, 24000, 32000, 44100)
         - bitrate (int): Audio bitrate (32000, 64000, 128000, 256000)
         - format (str): Audio output format (mp3, wav, pcm)
-        
+
     Outputs:
         - audio_url (AudioUrlArtifact): Generated music as URL artifact
         - provider_response (dict): Full API response
     """
-    
+
     SERVICE_NAME = "Minimax"
     API_KEY_NAME = "MINIMAX_API_KEY"
     API_BASE_URL = "https://api.minimax.io/v1/music_generation"
-    
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.category = "Audio Generation"
         self.description = "Generate music using Minimax music generation API"
-        
+
         # Prompt parameter
         self.add_parameter(
             Parameter(
@@ -82,7 +79,7 @@ class MinimaxMusicGeneration(DataNode):
                 },
             )
         )
-        
+
         # Lyrics parameter
         self.add_parameter(
             Parameter(
@@ -98,7 +95,7 @@ class MinimaxMusicGeneration(DataNode):
                 },
             )
         )
-        
+
         # Model selection
         self.add_parameter(
             Parameter(
@@ -112,10 +109,10 @@ class MinimaxMusicGeneration(DataNode):
                 ui_options={"display_name": "Model"},
             )
         )
-        
+
         # Audio settings in a parameter group
         from griptape_nodes.exe_types.core_types import ParameterGroup
-        
+
         with ParameterGroup(name="Audio Settings") as audio_group:
             Parameter(
                 name="sample_rate",
@@ -127,7 +124,7 @@ class MinimaxMusicGeneration(DataNode):
                 traits={Options(choices=SAMPLE_RATE_OPTIONS)},
                 ui_options={"display_name": "Sample Rate (Hz)"},
             )
-            
+
             Parameter(
                 name="bitrate",
                 input_types=["int"],
@@ -138,7 +135,7 @@ class MinimaxMusicGeneration(DataNode):
                 traits={Options(choices=BITRATE_OPTIONS)},
                 ui_options={"display_name": "Bitrate (bps)"},
             )
-            
+
             Parameter(
                 name="format",
                 input_types=["str"],
@@ -149,10 +146,10 @@ class MinimaxMusicGeneration(DataNode):
                 traits={Options(choices=AUDIO_FORMAT_OPTIONS)},
                 ui_options={"display_name": "Format"},
             )
-        
+
         audio_group.ui_options = {"collapsed": True}
         self.add_node_element(audio_group)
-        
+
         # OUTPUTS
         self.add_parameter(
             Parameter(
@@ -165,7 +162,7 @@ class MinimaxMusicGeneration(DataNode):
                 ui_options={"is_full_width": True, "pulse_on_run": True},
             )
         )
-        
+
         self.add_parameter(
             Parameter(
                 name="provider_response",
@@ -185,25 +182,33 @@ class MinimaxMusicGeneration(DataNode):
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
         exceptions = []
-        
+
         # Validate prompt
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
             exceptions.append(ValueError(f"{self.name}: Prompt is required"))
         elif len(prompt) < 10:
-            exceptions.append(ValueError(f"{self.name}: Prompt must be at least 10 characters (current: {len(prompt)} characters)"))
+            exceptions.append(
+                ValueError(f"{self.name}: Prompt must be at least 10 characters (current: {len(prompt)} characters)")
+            )
         elif len(prompt) > 300:
-            exceptions.append(ValueError(f"{self.name}: Prompt must be 300 characters or less (current: {len(prompt)} characters)"))
-        
+            exceptions.append(
+                ValueError(f"{self.name}: Prompt must be 300 characters or less (current: {len(prompt)} characters)")
+            )
+
         # Validate lyrics
         lyrics = self.get_parameter_value("lyrics")
         if not lyrics or not lyrics.strip():
             exceptions.append(ValueError(f"{self.name}: Lyrics are required"))
         elif len(lyrics) < 10:
-            exceptions.append(ValueError(f"{self.name}: Lyrics must be at least 10 characters (current: {len(lyrics)} characters)"))
+            exceptions.append(
+                ValueError(f"{self.name}: Lyrics must be at least 10 characters (current: {len(lyrics)} characters)")
+            )
         elif len(lyrics) > 3000:
-            exceptions.append(ValueError(f"{self.name}: Lyrics must be 3000 characters or less (current: {len(lyrics)} characters)"))
-        
+            exceptions.append(
+                ValueError(f"{self.name}: Lyrics must be 3000 characters or less (current: {len(lyrics)} characters)")
+            )
+
         return exceptions if exceptions else None
 
     def process(self) -> AsyncResult[None]:
@@ -214,29 +219,29 @@ class MinimaxMusicGeneration(DataNode):
         """Main processing method for music generation."""
         # Get parameters
         params = self._get_parameters()
-        
+
         # Validate API key
         api_key = self._validate_api_key()
-        
+
         # Prepare headers
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        
+
         # Submit request and get result
         try:
             response_data = self._submit_request(params, headers)
             if not response_data:
                 return
-            
+
             self.parameter_output_values["provider_response"] = response_data
-            
+
             # Check status
             data = response_data.get("data", {})
             status = data.get("status")
-            
+
             if status == 2:  # Completed
                 self._log("Music generation completed successfully")
                 audio_url = data.get("audio")
-                
+
                 if audio_url:
                     # Download and save the audio
                     self._save_audio_from_url(audio_url, params["format"])
@@ -246,7 +251,7 @@ class MinimaxMusicGeneration(DataNode):
             else:
                 self._log(f"Unexpected status: {status}")
                 self._set_safe_defaults()
-                
+
         except Exception as e:
             self._log(f"Error in music generation: {e}")
             self._set_safe_defaults()
@@ -262,7 +267,7 @@ class MinimaxMusicGeneration(DataNode):
             "bitrate": self.get_parameter_value("bitrate") or 128000,
             "format": self.get_parameter_value("format") or "mp3",
         }
-        
+
         return params
 
     def _validate_api_key(self) -> str:
@@ -277,33 +282,28 @@ class MinimaxMusicGeneration(DataNode):
     def _submit_request(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
         """Submit the music generation request to Minimax API."""
         payload = self._build_payload(params)
-        
+
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
-        
+
         try:
-            response = requests.post(
-                self.API_BASE_URL,
-                json=payload,
-                headers=headers,
-                timeout=DEFAULT_TIMEOUT
-            )
+            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
-            
+
             response_data = response.json()
-            self._log(f"Received response from API")
-            
+            self._log("Received response from API")
+
             # Check base_resp for errors
             base_resp = response_data.get("base_resp", {})
             status_code = base_resp.get("status_code")
-            
+
             if status_code != 0:
                 status_msg = base_resp.get("status_msg", "Unknown error")
                 self._log(f"API error: {status_code} - {status_msg}")
                 raise RuntimeError(f"Music generation failed: {status_msg} (code: {status_code})")
-            
+
             return response_data
-            
+
         except requests.RequestException as e:
             self._log(f"Request failed: {e}")
             msg = f"{self.name} request failed: {e}"
@@ -321,9 +321,9 @@ class MinimaxMusicGeneration(DataNode):
                 "sample_rate": params["sample_rate"],
                 "bitrate": params["bitrate"],
                 "format": params["format"],
-            }
+            },
         }
-        
+
         return payload
 
     def _log_request(self, payload: dict[str, Any]) -> None:
@@ -334,7 +334,7 @@ class MinimaxMusicGeneration(DataNode):
                 sanitized_payload["prompt"] = sanitized_payload["prompt"][:PROMPT_TRUNCATE_LENGTH] + "..."
             if "lyrics" in sanitized_payload and len(sanitized_payload["lyrics"]) > PROMPT_TRUNCATE_LENGTH:
                 sanitized_payload["lyrics"] = sanitized_payload["lyrics"][:PROMPT_TRUNCATE_LENGTH] + "..."
-            
+
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
     def _save_audio_from_url(self, audio_url: str, audio_format: str) -> None:
@@ -352,15 +352,10 @@ class MinimaxMusicGeneration(DataNode):
         saved_url = static_files_manager.save_static_file(audio_bytes, filename, ExistingFilePolicy.CREATE_NEW)
 
         # Create AudioUrlArtifact
-        self.parameter_output_values["audio_url"] = AudioUrlArtifact(
-            value=saved_url,
-            name=filename
-        )
+        self.parameter_output_values["audio_url"] = AudioUrlArtifact(value=saved_url, name=filename)
         self._log(f"Saved audio to static storage as {filename}")
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
         self.parameter_output_values["audio_url"] = None
         self.parameter_output_values["provider_response"] = None
-
-

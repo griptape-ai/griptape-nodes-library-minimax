@@ -9,15 +9,13 @@ from typing import Any
 
 import requests
 from griptape.artifacts import ImageUrlArtifact
-
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
-
-from griptape_nodes.files.file import File, FileLoadError
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +26,7 @@ PROMPT_TRUNCATE_LENGTH = 100
 DEFAULT_TIMEOUT = 60
 
 # Model options for Minimax text-to-image
-MODEL_OPTIONS = [
-    "image-01"
-]
+MODEL_OPTIONS = ["image-01"]
 
 # Aspect ratio options
 ASPECT_RATIO_OPTIONS = [
@@ -42,16 +38,16 @@ ASPECT_RATIO_OPTIONS = [
     "3:4 (864x1152)",
     "9:16 (720x1280)",
     "21:9 (1344x576)",
-    "Use height and width"
+    "Use height and width",
 ]
 
 
 class MinimaxTextToImage(DataNode):
     """Generate images using Minimax text-to-image API.
-    
+
     This node uses the Minimax API to generate images from text prompts.
     Supports various models, aspect ratios, custom dimensions, and multiple image generation.
-    
+
     Inputs:
         - prompt (str): Text description of the image to generate
         - model (str): Model to use for generation
@@ -61,23 +57,23 @@ class MinimaxTextToImage(DataNode):
         - prompt_optimizer (bool): Enable prompt optimization for better quality
         - height (int): Custom height in pixels (512-2048, step of 8, hidden by default)
         - width (int): Custom width in pixels (512-2048, step of 8, hidden by default)
-        
+
     Outputs:
         - image_url (ImageUrlArtifact): Primary generated image as URL artifact
         - images (list[ImageUrlArtifact]): List of all generated images (shown when num_images > 1)
         - generation_id (str): Generation ID from the API
         - provider_response (dict): Full API response
     """
-    
+
     SERVICE_NAME = "Minimax"
     API_KEY_NAME = "MINIMAX_API_KEY"
     API_BASE_URL = "https://api.minimax.io/v1/image_generation"
-    
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.category = "Image Generation"
         self.description = "Generate images using Minimax text-to-image API"
-        
+
         # Core prompt parameter
         self.add_parameter(
             Parameter(
@@ -93,7 +89,7 @@ class MinimaxTextToImage(DataNode):
                 },
             )
         )
-        
+
         # Model selection
         self.add_parameter(
             Parameter(
@@ -107,7 +103,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"display_name": "Model"},
             )
         )
-        
+
         # Aspect ratio selection
         self.add_parameter(
             Parameter(
@@ -121,8 +117,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
-        
-        
+
         # Seed parameter for reproducibility
         self.add_parameter(
             Parameter(
@@ -135,7 +130,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"display_name": "Seed"},
             )
         )
-        
+
         # Number of images parameter (hidden)
         self.add_parameter(
             Parameter(
@@ -146,13 +141,10 @@ class MinimaxTextToImage(DataNode):
                 tooltip="Number of images to generate (1-9)",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 traits={Slider(min_val=1, max_val=9)},
-                ui_options={
-                    "display_name": "Number of Images",
-                    "hide": False
-                },
+                ui_options={"display_name": "Number of Images", "hide": False},
             )
         )
-        
+
         # Prompt optimizer parameter
         self.add_parameter(
             Parameter(
@@ -165,7 +157,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"display_name": "Prompt Optimizer"},
             )
         )
-        
+
         # Height parameter (for custom dimensions)
         height_param = Parameter(
             name="height",
@@ -177,12 +169,12 @@ class MinimaxTextToImage(DataNode):
             ui_options={
                 "display_name": "Height",
                 "hide": True,  # Hidden by default, shown when "Use height and width" is selected
-                "step": 8
-            },  
+                "step": 8,
+            },
         )
         height_param.add_trait(Slider(min_val=512, max_val=2048))
         self.add_parameter(height_param)
-        
+
         # Width parameter (for custom dimensions)
         width_param = Parameter(
             name="width",
@@ -194,12 +186,12 @@ class MinimaxTextToImage(DataNode):
             ui_options={
                 "display_name": "Width",
                 "hide": True,  # Hidden by default, shown when "Use height and width" is selected
-                "step": 8
+                "step": 8,
             },
         )
         width_param.add_trait(Slider(min_val=512, max_val=2048))
         self.add_parameter(width_param)
-        
+
         # OUTPUTS
         self.add_parameter(
             Parameter(
@@ -212,7 +204,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"is_full_width": True, "pulse_on_run": True},
             )
         )
-        
+
         self.add_parameter(
             Parameter(
                 name="generation_id",
@@ -222,7 +214,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"hide_property": True},
             )
         )
-        
+
         self.add_parameter(
             Parameter(
                 name="provider_response",
@@ -233,7 +225,7 @@ class MinimaxTextToImage(DataNode):
                 ui_options={"hide_property": True},
             )
         )
-        
+
         # Images list output (for multiple images when num_images > 1)
         self.add_parameter(
             Parameter(
@@ -244,9 +236,9 @@ class MinimaxTextToImage(DataNode):
                 allowed_modes={ParameterMode.OUTPUT, ParameterMode.PROPERTY},
                 settable=False,
                 ui_options={
-                    "is_full_width": True, 
+                    "is_full_width": True,
                     "pulse_on_run": True,
-                    "hide": True  # Hidden by default, shown when num_images > 1
+                    "hide": True,  # Hidden by default, shown when num_images > 1
                 },
             )
         )
@@ -262,7 +254,7 @@ class MinimaxTextToImage(DataNode):
                 # Hide height and width parameters
                 self.hide_parameter_by_name("height")
                 self.hide_parameter_by_name("width")
-        
+
         if parameter.name == "num_images":
             if value > 1:
                 # Show images list output
@@ -270,7 +262,7 @@ class MinimaxTextToImage(DataNode):
             else:
                 # Hide images list output
                 self.hide_parameter_by_name("images")
-        
+
         return super().after_value_set(parameter, value)
 
     def _log(self, message: str) -> None:
@@ -281,30 +273,36 @@ class MinimaxTextToImage(DataNode):
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
         exceptions = []
-        
+
         # Validate prompt is provided
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
             exceptions.append(ValueError(f"{self.name}: Prompt is required"))
         elif len(prompt) > 1500:
-            exceptions.append(ValueError(f"{self.name}: Prompt must be 1500 characters or less (current: {len(prompt)} characters)"))
-        
+            exceptions.append(
+                ValueError(f"{self.name}: Prompt must be 1500 characters or less (current: {len(prompt)} characters)")
+            )
+
         # Validate height and width if using custom dimensions
         aspect_ratio = self.get_parameter_value("aspect_ratio")
         if aspect_ratio == "Use height and width":
             height = self.get_parameter_value("height")
             width = self.get_parameter_value("width")
-            
+
             if height < 512 or height > 2048:
-                exceptions.append(ValueError(f"{self.name}: Height must be between 512 and 2048 pixels (current: {height})"))
+                exceptions.append(
+                    ValueError(f"{self.name}: Height must be between 512 and 2048 pixels (current: {height})")
+                )
             elif height % 8 != 0:
                 exceptions.append(ValueError(f"{self.name}: Height must be a multiple of 8 (current: {height})"))
-                
+
             if width < 512 or width > 2048:
-                exceptions.append(ValueError(f"{self.name}: Width must be between 512 and 2048 pixels (current: {width})"))
+                exceptions.append(
+                    ValueError(f"{self.name}: Width must be between 512 and 2048 pixels (current: {width})")
+                )
             elif width % 8 != 0:
                 exceptions.append(ValueError(f"{self.name}: Width must be a multiple of 8 (current: {width})"))
-        
+
         return exceptions if exceptions else None
 
     def process(self) -> AsyncResult[None]:
@@ -315,18 +313,15 @@ class MinimaxTextToImage(DataNode):
         """Main processing method for image generation."""
         # Get parameters
         params = self._get_parameters()
-        
+
         # Validate API key
         api_key = self._validate_api_key()
-        
+
         # Prepare headers
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
         self._log(f"Generating image with Minimax API using model: {params['model']}")
-        
+
         try:
             # Submit request
             response = self._submit_request(params, headers)
@@ -351,7 +346,7 @@ class MinimaxTextToImage(DataNode):
             "height": self.get_parameter_value("height") or 1024,
             "width": self.get_parameter_value("width") or 1024,
         }
-        
+
         return params
 
     def _validate_api_key(self) -> str:
@@ -366,22 +361,17 @@ class MinimaxTextToImage(DataNode):
     def _submit_request(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
         """Submit the image generation request to Minimax API."""
         payload = self._build_payload(params)
-        
+
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
-        
+
         try:
-            response = requests.post(
-                self.API_BASE_URL,
-                json=payload,
-                headers=headers,
-                timeout=DEFAULT_TIMEOUT
-            )
+            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
             response.raise_for_status()
             response_json = response.json()
             self._log("Request submitted successfully")
             return response_json
-            
+
         except requests.exceptions.HTTPError as e:
             self._log(f"HTTP error: {e.response.status_code} - {e.response.text}")
             msg = f"{self.name} API error: {e.response.status_code}"
@@ -398,17 +388,17 @@ class MinimaxTextToImage(DataNode):
             "model": params["model"],
             "n": params["num_images"],
         }
-        
+
         # Handle aspect ratio vs height/width
         if params["aspect_ratio"] == "Use height and width":
             # Use custom height and width (ensure they're multiples of 8)
             height = params["height"]
             width = params["width"]
-            
+
             # Round to nearest multiple of 8
             height = ((height + 4) // 8) * 8
             width = ((width + 4) // 8) * 8
-            
+
             payload["height"] = height
             payload["width"] = width
         else:
@@ -417,45 +407,49 @@ class MinimaxTextToImage(DataNode):
             if " " in aspect_ratio:
                 aspect_ratio = aspect_ratio.split(" ")[0]
             payload["aspect_ratio"] = aspect_ratio
-        
+
         # Add optional parameters
         if params["seed"] != -1:
             payload["seed"] = params["seed"]
-            
+
         if params["prompt_optimizer"]:
             payload["prompt_optimizer"] = True
-        
+
         return payload
 
     def _log_request(self, payload: dict[str, Any]) -> None:
         """Log the request payload with sensitive data sanitized."""
         with suppress(Exception):
             sanitized_payload = deepcopy(payload)
-            
+
             # Truncate long prompts for logging
             prompt = sanitized_payload.get("prompt", "")
             if len(prompt) > PROMPT_TRUNCATE_LENGTH:
                 sanitized_payload["prompt"] = prompt[:PROMPT_TRUNCATE_LENGTH] + "..."
-            
+
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
     def _handle_response(self, response: dict[str, Any]) -> None:
         """Handle the API response and set output parameters."""
-        
+
         self.parameter_output_values["provider_response"] = response
-        
+
         # Extract generation ID if available
         generation_id = response.get("id", response.get("request_id", ""))
         self.parameter_output_values["generation_id"] = str(generation_id)
-        
+
         # Extract image URLs from response
         # Minimax API returns image URLs in 'data.image_urls' field
         if "data" in response and response["data"]:
             image_data = response["data"]
-            if "image_urls" in image_data and isinstance(image_data["image_urls"], list) and len(image_data["image_urls"]) > 0:
+            if (
+                "image_urls" in image_data
+                and isinstance(image_data["image_urls"], list)
+                and len(image_data["image_urls"]) > 0
+            ):
                 image_urls = image_data["image_urls"]
                 self._log(f"Found {len(image_urls)} image URLs in response")
-                
+
                 # Save all images
                 saved_images = []
                 for i, image_url in enumerate(image_urls):
@@ -465,15 +459,15 @@ class MinimaxTextToImage(DataNode):
                             saved_images.append(saved_image)
                     else:
                         self._log(f"Empty image URL found at index {i}")
-                
+
                 # Set outputs based on number of images
                 if saved_images:
                     # Always set the first image as the primary output
                     self.parameter_output_values["image_url"] = saved_images[0]
-                    
+
                     # Set the images list output
                     self.parameter_output_values["images"] = saved_images
-                    
+
                     self._log(f"Successfully saved {len(saved_images)} images")
                 else:
                     self._log("No images were successfully saved")
@@ -504,10 +498,7 @@ class MinimaxTextToImage(DataNode):
         saved_url = static_files_manager.save_static_file(image_bytes, filename, ExistingFilePolicy.CREATE_NEW)
 
         # Create and return ImageUrlArtifact
-        image_artifact = ImageUrlArtifact(
-            value=saved_url,
-            name=filename
-        )
+        image_artifact = ImageUrlArtifact(value=saved_url, name=filename)
         self._log(f"Saved image {index + 1} to static storage as {filename}")
         return image_artifact
 
