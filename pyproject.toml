@@ -7,12 +7,11 @@ authors = [
 ]
 readme = "README.md"
 requires-python = ">3.12"
-dependencies = [
-    "griptape-nodes","requests","Pillow"
+dependencies = ["requests","Pillow"
 ]
 
 [tool.uv.sources]
-griptape-nodes = { git = "https://github.com/griptape-ai/griptape-nodes", rev="latest"}
+griptape-nodes-engine = { git = "https://github.com/griptape-ai/griptape-nodes-engine", rev="latest"}
 
 [tool.hatch.build.targets.wheel]
 packages = ["minimax"]
@@ -22,7 +21,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest"]
+dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest", "griptape-nodes-engine"]
 
 [tool.ruff]
 line-length = 120
