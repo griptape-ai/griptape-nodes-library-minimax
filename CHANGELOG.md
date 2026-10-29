@@ -10,4 +10,4 @@ the `library_version` in `minimax/griptape_nodes_library.json`.
 
 <!-- Entries go in changelog.d/, one file each. See changelog.d/README.md. -->
 
-[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-minimax/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-minimax/compare/fc789ae3078be8ac973dbc8d20a49efae9f9f715...HEAD
