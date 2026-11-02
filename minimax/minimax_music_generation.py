@@ -35,6 +35,9 @@ BITRATE_OPTIONS = [32000, 64000, 128000, 256000]
 # Audio format options
 AUDIO_FORMAT_OPTIONS = ["mp3", "wav", "pcm"]
 
+# Default output filename stem; the extension follows the format parameter
+DEFAULT_FILENAME_STEM = "minimax_music"
+
 
 class MinimaxMusicGeneration(DataNode):
     """Generate music using Minimax music generation API.
@@ -62,8 +65,14 @@ class MinimaxMusicGeneration(DataNode):
         super().__init__(**kwargs)
         self.category = "Audio Generation"
         self.description = "Generate music using Minimax music generation API"
-        self._output_file = ProjectFileParameter(node=self, name="output_file", default_filename="minimax_music.mp3")
+        self._output_file = ProjectFileParameter(
+            node=self, name="output_file", default_filename=f"{DEFAULT_FILENAME_STEM}.mp3"
+        )
         self._output_file.add_parameter()
+        # Runs after ProjectFileParameter's reset, so the editor shows the format-matched default
+        self.get_parameter_by_name("output_file").on_incoming_connection_removed.append(
+            lambda *_: self._sync_default_filename_extension(always_publish=True)
+        )
 
         # Prompt parameter
         self.add_parameter(
@@ -174,6 +183,27 @@ class MinimaxMusicGeneration(DataNode):
                 ui_options={"hide_property": True},
             )
         )
+
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        """Keep a default output filename's extension in step with the audio format."""
+        if parameter.name in ("format", "output_file"):
+            self._sync_default_filename_extension()
+
+        return super().after_value_set(parameter, value)
+
+    def _sync_default_filename_extension(self, *, always_publish: bool = False) -> None:
+        audio_format = self.get_parameter_value("format")
+        if audio_format not in AUDIO_FORMAT_OPTIONS:
+            return
+        default_filenames = {f"{DEFAULT_FILENAME_STEM}.{fmt}" for fmt in AUDIO_FORMAT_OPTIONS}
+        filename = f"{DEFAULT_FILENAME_STEM}.{audio_format}"
+        current = self.get_parameter_value("output_file")
+        if not isinstance(current, str) or current not in default_filenames:
+            return
+        if current != filename:
+            self.set_parameter_value("output_file", filename)
+        if current != filename or always_publish:
+            self.publish_update_to_parameter("output_file", filename)
 
     def _log(self, message: str) -> None:
         """Safe logging with exception suppression."""
