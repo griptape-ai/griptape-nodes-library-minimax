@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from typing import Any
@@ -11,8 +10,8 @@ import requests
 from griptape.artifacts import AudioUrlArtifact
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 
@@ -35,6 +34,9 @@ BITRATE_OPTIONS = [32000, 64000, 128000, 256000]
 
 # Audio format options
 AUDIO_FORMAT_OPTIONS = ["mp3", "wav", "pcm"]
+
+# Default output filename stem; the extension follows the format parameter
+DEFAULT_FILENAME_STEM = "minimax_music"
 
 
 class MinimaxMusicGeneration(DataNode):
@@ -63,6 +65,14 @@ class MinimaxMusicGeneration(DataNode):
         super().__init__(**kwargs)
         self.category = "Audio Generation"
         self.description = "Generate music using Minimax music generation API"
+        self._output_file = ProjectFileParameter(
+            node=self, name="output_file", default_filename=f"{DEFAULT_FILENAME_STEM}.mp3"
+        )
+        self._output_file.add_parameter()
+        # Runs after ProjectFileParameter's reset, so the editor shows the format-matched default
+        self.get_parameter_by_name("output_file").on_incoming_connection_removed.append(
+            lambda *_: self._sync_default_filename_extension(always_publish=True)
+        )
 
         # Prompt parameter
         self.add_parameter(
@@ -173,6 +183,27 @@ class MinimaxMusicGeneration(DataNode):
                 ui_options={"hide_property": True},
             )
         )
+
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        """Keep a default output filename's extension in step with the audio format."""
+        if parameter.name in ("format", "output_file"):
+            self._sync_default_filename_extension()
+
+        return super().after_value_set(parameter, value)
+
+    def _sync_default_filename_extension(self, *, always_publish: bool = False) -> None:
+        audio_format = self.get_parameter_value("format")
+        if audio_format not in AUDIO_FORMAT_OPTIONS:
+            return
+        default_filenames = {f"{DEFAULT_FILENAME_STEM}.{fmt}" for fmt in AUDIO_FORMAT_OPTIONS}
+        filename = f"{DEFAULT_FILENAME_STEM}.{audio_format}"
+        current = self.get_parameter_value("output_file")
+        if not isinstance(current, str) or current not in default_filenames:
+            return
+        if current != filename:
+            self.set_parameter_value("output_file", filename)
+        if current != filename or always_publish:
+            self.publish_update_to_parameter("output_file", filename)
 
     def _log(self, message: str) -> None:
         """Safe logging with exception suppression."""
@@ -338,22 +369,18 @@ class MinimaxMusicGeneration(DataNode):
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
 
     def _save_audio_from_url(self, audio_url: str, audio_format: str) -> None:
-        """Save audio from URL to static storage."""
+        """Save audio from URL to project storage."""
         self._log("Downloading generated audio from URL")
 
         # Download audio bytes
         audio_bytes = File(audio_url).read_bytes()
 
-        # Generate filename with timestamp
-        filename = f"minimax_music_{int(time.time())}.{audio_format}"
-
-        # Save to static storage
-        static_files_manager = GriptapeNodes.StaticFilesManager()
-        saved_url = static_files_manager.save_static_file(audio_bytes, filename, ExistingFilePolicy.CREATE_NEW)
+        # Save to project storage
+        saved = self._output_file.build_file().write_bytes(audio_bytes)
 
         # Create AudioUrlArtifact
-        self.parameter_output_values["audio_url"] = AudioUrlArtifact(value=saved_url, name=filename)
-        self._log(f"Saved audio to static storage as {filename}")
+        self.parameter_output_values["audio_url"] = AudioUrlArtifact(value=saved.location, name=saved.location)
+        self._log(f"Saved audio to project storage as {saved.location}")
 
     def _set_safe_defaults(self) -> None:
         """Set safe default values for all outputs."""
