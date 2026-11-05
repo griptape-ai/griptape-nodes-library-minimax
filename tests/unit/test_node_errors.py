@@ -144,6 +144,33 @@ def test_http_401_links_to_settings(name: str, secret: None, server: Any) -> Non
     assert excinfo.value.links[0].url == SETTINGS_LINK
 
 
+@pytest.mark.parametrize("name", list(NODES))
+def test_http_403_is_not_read_as_a_refused_key(name: str, secret: None, server: Any) -> None:
+    server(lambda _request: (403, {"error": {"message": "Forbidden by policy"}}))
+    with pytest.raises(NodeError) as excinfo:
+        _make(name)._process()
+    assert str(excinfo.value) == "Forbidden by policy"
+    assert excinfo.value.fields["status_code"] == 403
+    assert excinfo.value.links == []
+
+
+@pytest.mark.parametrize("name", VIDEO_NODES)
+def test_poll_403_is_not_read_as_a_refused_key(name: str, secret: None, server: Any) -> None:
+    server(_post_then((403, {"error": {"message": "Forbidden by policy"}})))
+    with pytest.raises(NodeError) as excinfo:
+        _make(name)._process()
+    assert str(excinfo.value) == "Forbidden by policy"
+    assert excinfo.value.links == []
+
+
+@pytest.mark.parametrize("name", VIDEO_NODES)
+def test_poll_401_links_to_settings_after_retries(name: str, secret: None, server: Any) -> None:
+    server(_post_then((401, {"error": {"message": "Unauthorized"}})))
+    with pytest.raises(NodeError, match="Minimax refused the API key") as excinfo:
+        _make(name)._process()
+    assert excinfo.value.links[0].url == SETTINGS_LINK
+
+
 def test_provider_error_message_is_minimax_s_own(secret: None, server: Any) -> None:
     body = {"base_resp": {"status_code": 1026, "status_msg": "The prompt did not pass the content check"}}
     server(lambda _request: (200, body))

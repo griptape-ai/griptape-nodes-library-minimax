@@ -16,11 +16,10 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from minimax_errors import (
-    API_KEY_ENV_VAR,
     API_KEY_URL,
     CREDENTIAL_REJECTED_CODES,
-    PROVIDER,
     base_resp_error,
+    request_error,
     request_json,
     result_error,
     task_failed_error,
@@ -439,9 +438,7 @@ class MinimaxTextToVideo(DataNode):
                 status_data = response.json()
             except requests.RequestException as e:
                 self._log(f"Polling request failed (attempt {attempt + 1}): {e}")
-                last_error = NodeError.from_request_exception(
-                    e, provider=PROVIDER, secret_name=API_KEY_ENV_VAR, fields=fields
-                )
+                last_error = request_error(e, fields=fields)
                 continue
 
             if not isinstance(status_data, dict):
