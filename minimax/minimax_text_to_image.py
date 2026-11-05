@@ -6,15 +6,15 @@ from contextlib import suppress
 from copy import deepcopy
 from typing import Any
 
-import requests
 from griptape.artifacts import ImageUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
+from minimax_errors import API_KEY_URL, request_json, result_error
 
 logger = logging.getLogger(__name__)
 
@@ -273,16 +273,18 @@ class MinimaxTextToImage(DataNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
-        exceptions = []
+        # A missing key comes first and alone, so the user sees the Settings link without input noise.
+        if not GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME):
+            return [NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)]
+
+        exceptions: list[Exception] = []
 
         # Validate prompt is provided
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
-            exceptions.append(ValueError(f"{self.name}: Prompt is required"))
+            exceptions.append(NodeError("'Prompt' is empty. Enter a prompt and run the node again."))
         elif len(prompt) > 1500:
-            exceptions.append(
-                ValueError(f"{self.name}: Prompt must be 1500 characters or less (current: {len(prompt)} characters)")
-            )
+            exceptions.append(NodeError(f"'Prompt' must be 1500 characters or less. It has {len(prompt)}."))
 
         # Validate height and width if using custom dimensions
         aspect_ratio = self.get_parameter_value("aspect_ratio")
@@ -291,18 +293,14 @@ class MinimaxTextToImage(DataNode):
             width = self.get_parameter_value("width")
 
             if height < 512 or height > 2048:
-                exceptions.append(
-                    ValueError(f"{self.name}: Height must be between 512 and 2048 pixels (current: {height})")
-                )
+                exceptions.append(NodeError(f"'Height' must be between 512 and 2048. It is set to {height}."))
             elif height % 8 != 0:
-                exceptions.append(ValueError(f"{self.name}: Height must be a multiple of 8 (current: {height})"))
+                exceptions.append(NodeError(f"'Height' must be a multiple of 8. It is set to {height}."))
 
             if width < 512 or width > 2048:
-                exceptions.append(
-                    ValueError(f"{self.name}: Width must be between 512 and 2048 pixels (current: {width})")
-                )
+                exceptions.append(NodeError(f"'Width' must be between 512 and 2048. It is set to {width}."))
             elif width % 8 != 0:
-                exceptions.append(ValueError(f"{self.name}: Width must be a multiple of 8 (current: {width})"))
+                exceptions.append(NodeError(f"'Width' must be a multiple of 8. It is set to {width}."))
 
         return exceptions if exceptions else None
 
@@ -326,10 +324,7 @@ class MinimaxTextToImage(DataNode):
         try:
             # Submit request
             response = self._submit_request(params, headers)
-            if response:
-                self._handle_response(response)
-            else:
-                self._set_safe_defaults()
+            self._handle_response(response)
         except Exception as e:
             self._log(f"Error in image generation: {e}")
             self._set_safe_defaults()
@@ -355,32 +350,25 @@ class MinimaxTextToImage(DataNode):
         api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
-            msg = f"{self.name} is missing {self.API_KEY_NAME}. Ensure it's set in the environment/config."
-            raise ValueError(msg)
+            raise NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)
         return api_key
 
-    def _submit_request(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
+    def _submit_request(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         """Submit the image generation request to Minimax API."""
         payload = self._build_payload(params)
 
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
 
-        try:
-            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-            response_json = response.json()
-            self._log("Request submitted successfully")
-            return response_json
-
-        except requests.exceptions.HTTPError as e:
-            self._log(f"HTTP error: {e.response.status_code} - {e.response.text}")
-            msg = f"{self.name} API error: {e.response.status_code}"
-            raise RuntimeError(msg) from e
-        except Exception as e:
-            self._log(f"Request failed: {e}")
-            msg = f"{self.name} request failed: {e}"
-            raise RuntimeError(msg) from e
+        response_json = request_json(
+            "POST",
+            self.API_BASE_URL,
+            headers=headers,
+            json=payload,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        self._log("Request submitted successfully")
+        return response_json
 
     def _build_payload(self, params: dict[str, Any]) -> dict[str, Any]:
         """Build the API request payload."""
@@ -439,49 +427,28 @@ class MinimaxTextToImage(DataNode):
         generation_id = response.get("id", response.get("request_id", ""))
         self.parameter_output_values["generation_id"] = str(generation_id)
 
-        # Extract image URLs from response
         # Minimax API returns image URLs in 'data.image_urls' field
-        if "data" in response and response["data"]:
-            image_data = response["data"]
-            if (
-                "image_urls" in image_data
-                and isinstance(image_data["image_urls"], list)
-                and len(image_data["image_urls"]) > 0
-            ):
-                image_urls = image_data["image_urls"]
-                self._log(f"Found {len(image_urls)} image URLs in response")
+        data = response.get("data")
+        image_urls = data.get("image_urls") if isinstance(data, dict) else None
+        if not isinstance(image_urls, list) or not image_urls:
+            raise result_error("images", fields={"generation_id": str(generation_id)}, response=response)
+        self._log(f"Found {len(image_urls)} image URLs in response")
 
-                # Save all images
-                saved_images = []
-                for i, image_url in enumerate(image_urls):
-                    if image_url:
-                        saved_image = self._save_image_from_url(image_url, index=i)
-                        if saved_image:
-                            saved_images.append(saved_image)
-                    else:
-                        self._log(f"Empty image URL found at index {i}")
-
-                # Set outputs based on number of images
-                if saved_images:
-                    # Always set the first image as the primary output
-                    self.parameter_output_values["image_url"] = saved_images[0]
-
-                    # Set the images list output
-                    self.parameter_output_values["images"] = saved_images
-
-                    self._log(f"Successfully saved {len(saved_images)} images")
-                else:
-                    self._log("No images were successfully saved")
-                    self.parameter_output_values["image_url"] = None
-                    self.parameter_output_values["images"] = []
+        # Save all images
+        saved_images = []
+        for i, image_url in enumerate(image_urls):
+            if image_url:
+                saved_images.append(self._save_image_from_url(image_url, index=i))
             else:
-                self._log("No image_urls array found in response data")
-                self.parameter_output_values["image_url"] = None
-                self.parameter_output_values["images"] = []
-        else:
-            self._log("No data field in response")
-            self.parameter_output_values["image_url"] = None
-            self.parameter_output_values["images"] = []
+                self._log(f"Empty image URL found at index {i}")
+
+        if not saved_images:
+            raise result_error("usable image URLs", fields={"generation_id": str(generation_id)}, response=response)
+
+        # Always set the first image as the primary output
+        self.parameter_output_values["image_url"] = saved_images[0]
+        self.parameter_output_values["images"] = saved_images
+        self._log(f"Successfully saved {len(saved_images)} images")
 
     def _save_image_from_url(self, image_url: str, index: int = 0) -> ImageUrlArtifact:
         """Save image from URL to project storage and return ImageUrlArtifact."""

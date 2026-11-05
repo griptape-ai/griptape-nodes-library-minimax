@@ -6,14 +6,14 @@ from contextlib import suppress
 from copy import deepcopy
 from typing import Any
 
-import requests
 from griptape.artifacts import AudioUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
+from minimax_errors import API_KEY_URL, request_json, result_error
 
 logger = logging.getLogger(__name__)
 
@@ -212,33 +212,29 @@ class MinimaxMusicGeneration(DataNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
-        exceptions = []
+        # A missing key comes first and alone, so the user sees the Settings link without input noise.
+        if not GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME):
+            return [NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)]
+
+        exceptions: list[Exception] = []
 
         # Validate prompt
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
-            exceptions.append(ValueError(f"{self.name}: Prompt is required"))
+            exceptions.append(NodeError("'Prompt' is empty. Enter a prompt and run the node again."))
         elif len(prompt) < 10:
-            exceptions.append(
-                ValueError(f"{self.name}: Prompt must be at least 10 characters (current: {len(prompt)} characters)")
-            )
+            exceptions.append(NodeError(f"'Prompt' must be at least 10 characters. It has {len(prompt)}."))
         elif len(prompt) > 300:
-            exceptions.append(
-                ValueError(f"{self.name}: Prompt must be 300 characters or less (current: {len(prompt)} characters)")
-            )
+            exceptions.append(NodeError(f"'Prompt' must be 300 characters or less. It has {len(prompt)}."))
 
         # Validate lyrics
         lyrics = self.get_parameter_value("lyrics")
         if not lyrics or not lyrics.strip():
-            exceptions.append(ValueError(f"{self.name}: Lyrics are required"))
+            exceptions.append(NodeError("'Lyrics' is empty. Enter the song lyrics and run the node again."))
         elif len(lyrics) < 10:
-            exceptions.append(
-                ValueError(f"{self.name}: Lyrics must be at least 10 characters (current: {len(lyrics)} characters)")
-            )
+            exceptions.append(NodeError(f"'Lyrics' must be at least 10 characters. It has {len(lyrics)}."))
         elif len(lyrics) > 3000:
-            exceptions.append(
-                ValueError(f"{self.name}: Lyrics must be 3000 characters or less (current: {len(lyrics)} characters)")
-            )
+            exceptions.append(NodeError(f"'Lyrics' must be 3000 characters or less. It has {len(lyrics)}."))
 
         return exceptions if exceptions else None
 
@@ -260,28 +256,28 @@ class MinimaxMusicGeneration(DataNode):
         # Submit request and get result
         try:
             response_data = self._submit_request(params, headers)
-            if not response_data:
-                return
 
             self.parameter_output_values["provider_response"] = response_data
 
             # Check status
-            data = response_data.get("data", {})
+            data = response_data.get("data") or {}
             status = data.get("status")
 
             if status == 2:  # Completed
                 self._log("Music generation completed successfully")
                 audio_url = data.get("audio")
 
-                if audio_url:
-                    # Download and save the audio
-                    self._save_audio_from_url(audio_url, params["format"])
-                else:
-                    self._log("No audio URL in response")
-                    self._set_safe_defaults()
+                if not audio_url:
+                    raise result_error("audio URL", response=response_data)
+
+                # Download and save the audio
+                self._save_audio_from_url(audio_url, params["format"])
             else:
-                self._log(f"Unexpected status: {status}")
-                self._set_safe_defaults()
+                raise NodeError(
+                    "Minimax did not return finished audio. Run the node again.",
+                    fields={"status": str(status)},
+                    response=response_data,
+                )
 
         except Exception as e:
             self._log(f"Error in music generation: {e}")
@@ -306,39 +302,25 @@ class MinimaxMusicGeneration(DataNode):
         api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
-            msg = f"{self.name} is missing {self.API_KEY_NAME}. Ensure it's set in the environment/config."
-            raise ValueError(msg)
+            raise NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)
         return api_key
 
-    def _submit_request(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
+    def _submit_request(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         """Submit the music generation request to Minimax API."""
         payload = self._build_payload(params)
 
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
 
-        try:
-            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-
-            response_data = response.json()
-            self._log("Received response from API")
-
-            # Check base_resp for errors
-            base_resp = response_data.get("base_resp", {})
-            status_code = base_resp.get("status_code")
-
-            if status_code != 0:
-                status_msg = base_resp.get("status_msg", "Unknown error")
-                self._log(f"API error: {status_code} - {status_msg}")
-                raise RuntimeError(f"Music generation failed: {status_msg} (code: {status_code})")
-
-            return response_data
-
-        except requests.RequestException as e:
-            self._log(f"Request failed: {e}")
-            msg = f"{self.name} request failed: {e}"
-            raise RuntimeError(msg) from e
+        response_data = request_json(
+            "POST",
+            self.API_BASE_URL,
+            headers=headers,
+            json=payload,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        self._log("Received response from API")
+        return response_data
 
     def _build_payload(self, params: dict[str, Any]) -> dict[str, Any]:
         """Build the API request payload."""

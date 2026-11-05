@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from typing import Any
 
-import requests
 from griptape.artifacts import VideoUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
+from minimax_errors import API_KEY_URL, request_json, result_error
+from minimax_video import poll_for_completion, retrieve_video_file
 
 logger = logging.getLogger(__name__)
 
@@ -250,16 +250,18 @@ class MinimaxTextToVideo(DataNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
-        exceptions = []
+        # A missing key comes first and alone, so the user sees the Settings link without input noise.
+        if not GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME):
+            return [NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)]
+
+        exceptions: list[Exception] = []
 
         # Validate prompt is provided
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
-            exceptions.append(ValueError(f"{self.name}: Prompt is required"))
+            exceptions.append(NodeError("'Prompt' is empty. Enter a prompt and run the node again."))
         elif len(prompt) > 2000:
-            exceptions.append(
-                ValueError(f"{self.name}: Prompt must be 2000 characters or less (current: {len(prompt)} characters)")
-            )
+            exceptions.append(NodeError(f"'Prompt' must be 2000 characters or less. It has {len(prompt)}."))
 
         # Validate duration and resolution compatibility
         model = self.get_parameter_value("model")
@@ -268,18 +270,28 @@ class MinimaxTextToVideo(DataNode):
 
         if duration == 10:
             if model != "MiniMax-Hailuo-02":
-                exceptions.append(ValueError(f"{self.name}: 10s duration only supported by MiniMax-Hailuo-02 model"))
+                exceptions.append(
+                    NodeError(
+                        "A 10 second 'Duration' is only supported by MiniMax-Hailuo-02. Choose 6 seconds or change 'Model'."
+                    )
+                )
             elif resolution == "1080P":
-                exceptions.append(ValueError(f"{self.name}: 10s duration not supported with 1080P resolution"))
+                exceptions.append(
+                    NodeError(
+                        "A 10 second 'Duration' is not supported at 1080P. Choose 6 seconds or a lower 'Resolution'."
+                    )
+                )
 
         if model == "MiniMax-Hailuo-02":
             if resolution not in RESOLUTION_OPTIONS_HAILUO:
                 exceptions.append(
-                    ValueError(f"{self.name}: Resolution {resolution} not supported for MiniMax-Hailuo-02")
+                    NodeError(
+                        f"'Resolution' {resolution} is not supported by MiniMax-Hailuo-02. Choose 512P, 768P or 1080P."
+                    )
                 )
         else:
             if resolution != "720P":
-                exceptions.append(ValueError(f"{self.name}: Only 720P resolution supported for {model}"))
+                exceptions.append(NodeError(f"{model} only supports 720P. Set 'Resolution' to 720P or change 'Model'."))
 
         return exceptions if exceptions else None
 
@@ -301,29 +313,23 @@ class MinimaxTextToVideo(DataNode):
 
             # Submit task and get task ID
             task_response = self._submit_task(params, headers)
-            if not task_response:
-                return
 
             task_id = task_response.get("task_id")
             if not task_id:
-                self._log("No task_id in response")
-                self._set_safe_defaults()
-                return
+                raise result_error("task ID", response=task_response)
 
             self.parameter_output_values["task_id"] = task_id
             self._log(f"Task submitted successfully: {task_id}")
 
             # Poll for completion and get file_id
-            file_id = self._poll_for_completion(task_id, headers)
-            if not file_id:
-                return
+            file_id = poll_for_completion(
+                task_id, headers, log=self._log, interval=POLLING_INTERVAL, max_attempts=MAX_POLLING_ATTEMPTS
+            )
 
             self._log(f"Task succeeded, File ID: {file_id}")
 
             # Retrieve video file from file_id
-            video_url = self._retrieve_video_file(file_id, headers)
-            if not video_url:
-                return
+            video_url = retrieve_video_file(file_id, headers, log=self._log, outputs=self.parameter_output_values)
 
             # Save the video
             self._save_video_from_url(video_url)
@@ -353,33 +359,25 @@ class MinimaxTextToVideo(DataNode):
         api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
-            msg = f"{self.name} is missing {self.API_KEY_NAME}. Ensure it's set in the environment/config."
-            raise ValueError(msg)
+            raise NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)
         return api_key
 
-    def _submit_task(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
+    def _submit_task(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         """Submit the video generation task to Minimax API."""
         payload = self._build_payload(params)
 
         self._log("Submitting video generation task to Minimax API")
         self._log_request(payload)
 
-        try:
-            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-
-            response_data = response.json()
-            self._log("Task submission successful")
-            return response_data
-
-        except requests.RequestException as e:
-            self._log(f"Task submission failed: {e}")
-            msg = f"{self.name} task submission failed: {e}"
-            raise RuntimeError(msg) from e
-        except Exception as e:
-            self._log(f"Request failed: {e}")
-            msg = f"{self.name} request failed: {e}"
-            raise RuntimeError(msg) from e
+        response_data = request_json(
+            "POST",
+            self.API_BASE_URL,
+            headers=headers,
+            json=payload,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        self._log("Task submission successful")
+        return response_data
 
     def _build_payload(self, params: dict[str, Any]) -> dict[str, Any]:
         """Build the API request payload."""
@@ -409,77 +407,6 @@ class MinimaxTextToVideo(DataNode):
                 sanitized_payload["prompt"] = sanitized_payload["prompt"][:PROMPT_TRUNCATE_LENGTH] + "..."
 
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
-
-    def _poll_for_completion(self, task_id: str, headers: dict[str, str]) -> str | None:
-        """Poll the API for task completion and return file_id."""
-        self._log(f"Starting to poll for task completion: {task_id}")
-
-        query_url = "https://api.minimax.io/v1/query/video_generation"
-
-        for attempt in range(MAX_POLLING_ATTEMPTS):
-            # Recommended polling interval to avoid unnecessary server load
-            time.sleep(POLLING_INTERVAL)
-
-            try:
-                # Query task status with task_id as query parameter
-                response = requests.get(
-                    query_url, headers=headers, params={"task_id": task_id}, timeout=DEFAULT_TIMEOUT
-                )
-                response.raise_for_status()
-
-                status_data = response.json()
-                status = status_data.get("status", "unknown")
-
-                self._log(f"Polling attempt {attempt + 1}: Status = {status}")
-
-                if status == "Success":
-                    self._log("Task completed successfully")
-                    file_id = status_data.get("file_id")
-                    if not file_id:
-                        raise RuntimeError("Success response missing file_id")
-                    return file_id
-                elif status == "Fail":
-                    error_msg = status_data.get("error_message", "Unknown error")
-                    self._log(f"Task failed: {error_msg}")
-                    raise RuntimeError(f"Video generation failed: {error_msg}")
-                else:
-                    # Task still in progress (Processing, Pending, etc.)
-                    continue
-
-            except requests.RequestException as e:
-                self._log(f"Polling request failed (attempt {attempt + 1}): {e}")
-                if attempt < MAX_POLLING_ATTEMPTS - 1:
-                    continue
-                else:
-                    raise RuntimeError(f"Polling failed after {MAX_POLLING_ATTEMPTS} attempts: {e}") from e
-
-        # If we get here, we've exceeded max attempts
-        raise RuntimeError(f"Task did not complete within {MAX_POLLING_ATTEMPTS * POLLING_INTERVAL} seconds")
-
-    def _retrieve_video_file(self, file_id: str, headers: dict[str, str]) -> str | None:
-        """Retrieve video download URL from file_id."""
-        try:
-            self._log(f"Retrieving video file for file_id: {file_id}")
-
-            retrieve_url = "https://api.minimax.io/v1/files/retrieve"
-            response = requests.get(retrieve_url, headers=headers, params={"file_id": file_id}, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-
-            response_data = response.json()
-            self.parameter_output_values["provider_response"] = response_data
-
-            # Extract download URL
-            download_url = response_data.get("file", {}).get("download_url")
-            if not download_url:
-                self._log("No download_url found in file retrieval response")
-                return None
-
-            self._log(f"Retrieved download URL: {download_url[:100]}...")
-            return download_url
-
-        except requests.RequestException as e:
-            self._log(f"File retrieval failed: {e}")
-            raise RuntimeError(f"Failed to retrieve video file: {e}") from e
 
     def _save_video_from_url(self, video_url: str) -> None:
         """Save video from URL to project storage."""

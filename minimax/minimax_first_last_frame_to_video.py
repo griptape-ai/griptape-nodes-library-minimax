@@ -3,20 +3,20 @@ from __future__ import annotations
 import base64
 import json as _json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from io import BytesIO
 from typing import Any
 
-import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact, VideoUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
+from minimax_errors import API_KEY_URL, request_json, result_error
+from minimax_video import poll_for_completion, retrieve_video_file
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -234,14 +234,18 @@ class MinimaxFirstLastFrameToVideo(DataNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
-        exceptions = []
+        # A missing key comes first and alone, so the user sees the Settings link without input noise.
+        if not GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME):
+            return [NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)]
+
+        exceptions: list[Exception] = []
 
         # Validate both frame images are provided
         first_frame_image = self.get_parameter_value("first_frame_image")
         last_frame_image = self.get_parameter_value("last_frame_image")
 
         if not first_frame_image:
-            exceptions.append(ValueError(f"{self.name}: First frame image is required"))
+            exceptions.append(NodeError("Connect an image to 'First Frame Image'."))
         else:
             # Validate first frame image requirements
             image_validation_errors = self._validate_image(first_frame_image, "first_frame_image")
@@ -249,7 +253,7 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                 exceptions.extend(image_validation_errors)
 
         if not last_frame_image:
-            exceptions.append(ValueError(f"{self.name}: Last frame image is required"))
+            exceptions.append(NodeError("Connect an image to 'Last Frame Image'."))
         else:
             # Validate last frame image requirements
             image_validation_errors = self._validate_image(last_frame_image, "last_frame_image")
@@ -259,22 +263,23 @@ class MinimaxFirstLastFrameToVideo(DataNode):
         # Validate prompt
         prompt = self.get_parameter_value("prompt")
         if prompt and len(prompt) > 2000:
-            exceptions.append(
-                ValueError(f"{self.name}: Prompt must be 2000 characters or less (current: {len(prompt)} characters)")
-            )
+            exceptions.append(NodeError(f"'Prompt' must be 2000 characters or less. It has {len(prompt)}."))
 
         # Validate duration and resolution compatibility
         duration = self.get_parameter_value("duration")
         resolution = self.get_parameter_value("resolution")
 
         if duration == 10 and resolution == "1080P":
-            exceptions.append(ValueError(f"{self.name}: 10s duration not supported with 1080P resolution"))
+            exceptions.append(
+                NodeError("A 10 second 'Duration' is not supported at 1080P. Choose 6 seconds or a lower 'Resolution'.")
+            )
 
         return exceptions if exceptions else None
 
     def _validate_image(self, image_artifact: ImageArtifact | ImageUrlArtifact, param_name: str) -> list[Exception]:
         """Validate image requirements: format, size, dimensions, aspect ratio."""
         exceptions = []
+        label = param_name.replace("_", " ").title()
 
         try:
             # For ImageUrlArtifact, we can't easily validate without downloading
@@ -305,7 +310,7 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                 size_mb = len(image_bytes) / (1024 * 1024)
                 if size_mb >= 20:
                     exceptions.append(
-                        ValueError(f"{self.name}: {param_name} size must be less than 20MB (current: {size_mb:.1f}MB)")
+                        NodeError(f"The image connected to '{label}' must be under 20MB. It is {size_mb:.1f}MB.")
                     )
 
                 # Validate format and dimensions using PIL
@@ -315,9 +320,7 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                     # Validate format
                     if img.format not in ["JPEG", "PNG", "WEBP"]:
                         exceptions.append(
-                            ValueError(
-                                f"{self.name}: {param_name} format must be JPG, JPEG, PNG, or WebP (current: {img.format})"
-                            )
+                            NodeError(f"The image connected to '{label}' must be JPG, PNG or WebP. It is {img.format}.")
                         )
 
                     # Validate dimensions
@@ -326,8 +329,8 @@ class MinimaxFirstLastFrameToVideo(DataNode):
 
                     if short_edge <= 300:
                         exceptions.append(
-                            ValueError(
-                                f"{self.name}: {param_name} short edge must be > 300px (current: {short_edge}px)"
+                            NodeError(
+                                f"The image connected to '{label}' needs a short edge over 300px. It is {short_edge}px."
                             )
                         )
 
@@ -338,9 +341,9 @@ class MinimaxFirstLastFrameToVideo(DataNode):
 
                     if aspect_ratio < min_ratio or aspect_ratio > max_ratio:
                         exceptions.append(
-                            ValueError(
-                                f"{self.name}: {param_name} aspect ratio must be between 2:5 and 5:2 "
-                                f"(current: {width}x{height} = {aspect_ratio:.2f})"
+                            NodeError(
+                                f"The image connected to '{label}' must have an aspect ratio between 2:5 and 5:2. "
+                                f"It is {width}x{height}."
                             )
                         )
 
@@ -372,29 +375,23 @@ class MinimaxFirstLastFrameToVideo(DataNode):
 
             # Submit task and get task ID
             task_response = self._submit_task(params, headers)
-            if not task_response:
-                return
 
             task_id = task_response.get("task_id")
             if not task_id:
-                self._log("No task_id in response")
-                self._set_safe_defaults()
-                return
+                raise result_error("task ID", response=task_response)
 
             self.parameter_output_values["task_id"] = task_id
             self._log(f"Task submitted successfully: {task_id}")
 
             # Poll for completion and get file_id
-            file_id = self._poll_for_completion(task_id, headers)
-            if not file_id:
-                return
+            file_id = poll_for_completion(
+                task_id, headers, log=self._log, interval=POLLING_INTERVAL, max_attempts=MAX_POLLING_ATTEMPTS
+            )
 
             self._log(f"Task succeeded, File ID: {file_id}")
 
             # Retrieve video file from file_id
-            video_url = self._retrieve_video_file(file_id, headers)
-            if not video_url:
-                return
+            video_url = retrieve_video_file(file_id, headers, log=self._log, outputs=self.parameter_output_values)
 
             # Save the video
             self._save_video_from_url(video_url)
@@ -426,33 +423,25 @@ class MinimaxFirstLastFrameToVideo(DataNode):
         api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
-            msg = f"{self.name} is missing {self.API_KEY_NAME}. Ensure it's set in the environment/config."
-            raise ValueError(msg)
+            raise NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)
         return api_key
 
-    def _submit_task(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any] | None:
+    def _submit_task(self, params: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
         """Submit the video generation request to Minimax API."""
         payload = self._build_payload(params)
 
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
 
-        try:
-            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-
-            response_data = response.json()
-            self._log(f"Task submission response: {_json.dumps(response_data, indent=2)}")
-            return response_data
-
-        except requests.RequestException as e:
-            self._log(f"Task submission failed: {e}")
-            msg = f"{self.name} task submission failed: {e}"
-            raise RuntimeError(msg) from e
-        except Exception as e:
-            self._log(f"Request failed: {e}")
-            msg = f"{self.name} request failed: {e}"
-            raise RuntimeError(msg) from e
+        response_data = request_json(
+            "POST",
+            self.API_BASE_URL,
+            headers=headers,
+            json=payload,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        self._log("Task submission successful")
+        return response_data
 
     def _build_payload(self, params: dict[str, Any]) -> dict[str, Any]:
         """Build the API request payload."""
@@ -630,76 +619,6 @@ class MinimaxFirstLastFrameToVideo(DataNode):
                 sanitized_payload["last_frame_image"] = f"{header},<base64 data redacted>"
 
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
-
-    def _poll_for_completion(self, task_id: str, headers: dict[str, str]) -> str | None:
-        """Poll the API for task completion and return file_id."""
-        self._log(f"Starting to poll for task completion: {task_id}")
-
-        query_url = "https://api.minimax.io/v1/query/video_generation"
-
-        for attempt in range(MAX_POLLING_ATTEMPTS):
-            time.sleep(POLLING_INTERVAL)
-
-            try:
-                response = requests.get(
-                    query_url, headers=headers, params={"task_id": task_id}, timeout=DEFAULT_TIMEOUT
-                )
-                response.raise_for_status()
-
-                status_data = response.json()
-                status = status_data.get("status", "unknown")
-
-                self._log(f"Polling attempt {attempt + 1}: Status = {status}")
-
-                if status == "Success":
-                    self._log("Task completed successfully")
-                    file_id = status_data.get("file_id")
-                    if not file_id:
-                        raise RuntimeError("Success response missing file_id")
-                    return file_id
-                elif status == "Fail":
-                    # Log full response for debugging
-                    self._log(f"Full API error response: {_json.dumps(status_data, indent=2)}")
-                    error_msg = status_data.get("error_message", "Unknown error")
-                    self._log(f"Task failed: {error_msg}")
-                    raise RuntimeError(f"Video generation failed: {error_msg}")
-                else:
-                    # Task still in progress (Processing, Pending, etc.)
-                    continue
-
-            except requests.RequestException as e:
-                self._log(f"Polling request failed (attempt {attempt + 1}): {e}")
-                if attempt < MAX_POLLING_ATTEMPTS - 1:
-                    continue
-                else:
-                    raise RuntimeError(f"Polling failed after {MAX_POLLING_ATTEMPTS} attempts: {e}") from e
-
-        raise RuntimeError(f"Task did not complete within {MAX_POLLING_ATTEMPTS * POLLING_INTERVAL} seconds")
-
-    def _retrieve_video_file(self, file_id: str, headers: dict[str, str]) -> str | None:
-        """Retrieve video download URL from file_id."""
-        try:
-            self._log(f"Retrieving video file for file_id: {file_id}")
-
-            retrieve_url = "https://api.minimax.io/v1/files/retrieve"
-            response = requests.get(retrieve_url, headers=headers, params={"file_id": file_id}, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-
-            response_data = response.json()
-            self.parameter_output_values["provider_response"] = response_data
-
-            # Extract download URL
-            download_url = response_data.get("file", {}).get("download_url")
-            if not download_url:
-                self._log("No download_url found in file retrieval response")
-                return None
-
-            self._log(f"Retrieved download URL: {download_url[:100]}...")
-            return download_url
-
-        except requests.RequestException as e:
-            self._log(f"File retrieval failed: {e}")
-            raise RuntimeError(f"Failed to retrieve video file: {e}") from e
 
     def _save_video_from_url(self, video_url: str) -> None:
         """Save video from URL to project storage."""
