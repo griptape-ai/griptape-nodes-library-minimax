@@ -8,15 +8,15 @@ from copy import deepcopy
 from io import BytesIO
 from typing import Any
 
-import requests
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
+from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
+from minimax_errors import API_KEY_URL, request_json, result_error
 from PIL import Image
 
 logger = logging.getLogger(__name__)
@@ -300,21 +300,23 @@ class MinimaxImageToImage(DataNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate parameters before running the node."""
-        exceptions = []
+        # A missing key comes first and alone, so the user sees the Settings link without input noise.
+        if not GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME):
+            return [NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)]
+
+        exceptions: list[Exception] = []
 
         # Validate prompt is provided
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
-            exceptions.append(ValueError(f"{self.name}: Prompt is required"))
+            exceptions.append(NodeError("'Prompt' is empty. Enter a prompt and run the node again."))
         elif len(prompt) > 1500:
-            exceptions.append(
-                ValueError(f"{self.name}: Prompt must be 1500 characters or less (current: {len(prompt)} characters)")
-            )
+            exceptions.append(NodeError(f"'Prompt' must be 1500 characters or less. It has {len(prompt)}."))
 
         # Validate reference image is provided
         reference_image = self.get_parameter_value("reference_image")
         if not reference_image:
-            exceptions.append(ValueError(f"{self.name}: Reference image is required"))
+            exceptions.append(NodeError("Connect an image to 'Reference Image'."))
         else:
             # Validate image format and size
             validation_errors = self._validate_reference_image(reference_image)
@@ -328,21 +330,21 @@ class MinimaxImageToImage(DataNode):
             width = self.get_parameter_value("width")
 
             if height < 512 or height > 2048:
-                exceptions.append(ValueError(f"{self.name}: Height must be between 512 and 2048 (current: {height})"))
+                exceptions.append(NodeError(f"'Height' must be between 512 and 2048. It is set to {height}."))
             elif height % 8 != 0:
-                exceptions.append(ValueError(f"{self.name}: Height must be a multiple of 8 (current: {height})"))
+                exceptions.append(NodeError(f"'Height' must be a multiple of 8. It is set to {height}."))
 
             if width < 512 or width > 2048:
-                exceptions.append(ValueError(f"{self.name}: Width must be between 512 and 2048 (current: {width})"))
+                exceptions.append(NodeError(f"'Width' must be between 512 and 2048. It is set to {width}."))
             elif width % 8 != 0:
-                exceptions.append(ValueError(f"{self.name}: Width must be a multiple of 8 (current: {width})"))
+                exceptions.append(NodeError(f"'Width' must be a multiple of 8. It is set to {width}."))
 
             # Only image-01 supports custom dimensions
             model = self.get_parameter_value("model")
             if model != "image-01":
                 exceptions.append(
-                    ValueError(
-                        f"{self.name}: Custom height and width only supported by image-01 model (current model: {model})"
+                    NodeError(
+                        f"'Height' and 'Width' only work with the image-01 model. 'Model' is set to {model}. Change 'Model' or choose an aspect ratio."
                     )
                 )
 
@@ -379,8 +381,9 @@ class MinimaxImageToImage(DataNode):
             # Check file size (< 10MB)
             if len(image_bytes) > 10 * 1024 * 1024:
                 exceptions.append(
-                    ValueError(
-                        f"{self.name}: Reference image must be less than 10MB (current: {len(image_bytes) / (1024 * 1024):.1f}MB)"
+                    NodeError(
+                        f"The image connected to 'Reference Image' must be under 10MB. "
+                        f"It is {len(image_bytes) / (1024 * 1024):.1f}MB."
                     )
                 )
 
@@ -389,10 +392,12 @@ class MinimaxImageToImage(DataNode):
                 img = Image.open(BytesIO(image_bytes))
                 if img.format not in ["JPEG", "PNG"]:
                     exceptions.append(
-                        ValueError(f"{self.name}: Reference image must be JPG, JPEG, or PNG (current: {img.format})")
+                        NodeError(f"The image connected to 'Reference Image' must be JPG or PNG. It is {img.format}.")
                     )
             except Exception as e:
-                exceptions.append(ValueError(f"{self.name}: Could not validate reference image format: {e}"))
+                exceptions.append(
+                    NodeError(f"Could not read the image connected to 'Reference Image': {e}. Connect a JPG or PNG.")
+                )
 
         except Exception as e:
             self._log(f"Error validating reference image: {e}")
@@ -426,9 +431,6 @@ class MinimaxImageToImage(DataNode):
         # Submit request
         try:
             response_data = self._submit_request(params, headers, reference_image_data)
-            if not response_data:
-                return
-
             self._handle_response(response_data, params)
 
         except Exception as e:
@@ -458,8 +460,7 @@ class MinimaxImageToImage(DataNode):
         api_key = GriptapeNodes.SecretsManager().get_secret(self.API_KEY_NAME)
         if not api_key:
             self._set_safe_defaults()
-            msg = f"{self.name} is missing {self.API_KEY_NAME}. Ensure it's set in the environment/config."
-            raise ValueError(msg)
+            raise NodeError.from_missing_secret(self.API_KEY_NAME, key_url=API_KEY_URL)
         return api_key
 
     def _get_image_data(self, image_artifact: ImageArtifact | ImageUrlArtifact) -> str:
@@ -554,35 +555,22 @@ class MinimaxImageToImage(DataNode):
 
     def _submit_request(
         self, params: dict[str, Any], headers: dict[str, str], reference_image_data: str
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """Submit the image generation request to Minimax API."""
         payload = self._build_payload(params, reference_image_data)
 
         self._log("Submitting request to Minimax API")
         self._log_request(payload)
 
-        try:
-            response = requests.post(self.API_BASE_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
-            response.raise_for_status()
-
-            response_data = response.json()
-            self._log("Received response from API")
-
-            # Check base_resp for errors
-            base_resp = response_data.get("base_resp", {})
-            status_code = base_resp.get("status_code")
-
-            if status_code != 0:
-                status_msg = base_resp.get("status_msg", "Unknown error")
-                self._log(f"API error: {status_code} - {status_msg}")
-                raise RuntimeError(f"Image generation failed: {status_msg} (code: {status_code})")
-
-            return response_data
-
-        except requests.RequestException as e:
-            self._log(f"Request failed: {e}")
-            msg = f"{self.name} request failed: {e}"
-            raise RuntimeError(msg) from e
+        response_data = request_json(
+            "POST",
+            self.API_BASE_URL,
+            headers=headers,
+            json=payload,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        self._log("Received response from API")
+        return response_data
 
     def _build_payload(self, params: dict[str, Any], reference_image_data: str) -> dict[str, Any]:
         """Build the API request payload."""
@@ -645,8 +633,7 @@ class MinimaxImageToImage(DataNode):
         image_urls = data.get("image_urls", [])
 
         if not image_urls:
-            self._log("No image URLs in response")
-            return
+            raise result_error("images", response=response_data)
 
         self._log(f"Received {len(image_urls)} image URL(s)")
 
