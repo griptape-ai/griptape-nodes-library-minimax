@@ -15,7 +15,7 @@
     "metadata": {
         "author": "Ian Massingham",
         "description": "Nodes to use Minimax API",
-        "library_version": "0.1.1",
+        "library_version": "0.2.0",
         "engine_version": "0.105.0",
         "tags": [
             "Griptape",
