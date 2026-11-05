@@ -324,28 +324,31 @@ Comprehensive validation and error reporting:
 - Pre-execution parameter validation
 - Image format and size checks
 - Model compatibility verification
-- Detailed error messages with current values
-- Full API response logging for debugging
+- Input problems name the parameter and the current value
+- Failures reach the editor as node errors: Minimax's own message, with the error code, task ID or file ID, and the response body under More info
+- A rejected API key (Minimax error 1004 or 2049) fails the run with a link to Settings. Before, the node finished with empty outputs.
 
 ## 🐛 Troubleshooting
 
 ### "Invalid params, first_frame_image" Error
 
-This usually means:
+This is Minimax's own text. The editor shows it as the error message, with the full response under More info. It usually means:
 - Image is from localhost (automatically converted now)
 - Image format doesn't match MIME type
 - Image dimensions outside valid range
 
-**Solution**: The nodes now automatically handle these cases with enhanced logging.
+**Solution**: Check the image against the requirements below.
 
-### "Task did not complete" Error
+### "The Minimax video did not finish within 10 minutes" Error
 
-Video generation timed out after 10 minutes.
+The node polled for 10 minutes without the task finishing. The task may still be running in Minimax, and the error carries its task ID.
 
-**Solution**: Try with:
+**Solution**: Run the node again, or try:
 - Lower resolution
 - Shorter duration
 - Simpler prompts
+
+If Minimax reports the task as failed, the message is "Minimax could not finish the video:" followed by Minimax's reason, such as a content check failure.
 
 ### Image Validation Failures
 
