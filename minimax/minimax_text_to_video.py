@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json as _json
 import logging
-import time
 from contextlib import suppress
 from copy import deepcopy
 from typing import Any
 
-import requests
 from griptape.artifacts import VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import NodeError, Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, DataNode
@@ -15,15 +13,8 @@ from griptape_nodes.exe_types.param_components.project_file_parameter import Pro
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-from minimax_errors import (
-    API_KEY_URL,
-    CREDENTIAL_REJECTED_CODES,
-    base_resp_error,
-    request_error,
-    request_json,
-    result_error,
-    task_failed_error,
-)
+from minimax_errors import API_KEY_URL, request_json, result_error
+from minimax_video import poll_for_completion, retrieve_video_file
 
 logger = logging.getLogger(__name__)
 
@@ -331,12 +322,14 @@ class MinimaxTextToVideo(DataNode):
             self._log(f"Task submitted successfully: {task_id}")
 
             # Poll for completion and get file_id
-            file_id = self._poll_for_completion(task_id, headers)
+            file_id = poll_for_completion(
+                task_id, headers, log=self._log, interval=POLLING_INTERVAL, max_attempts=MAX_POLLING_ATTEMPTS
+            )
 
             self._log(f"Task succeeded, File ID: {file_id}")
 
             # Retrieve video file from file_id
-            video_url = self._retrieve_video_file(file_id, headers)
+            video_url = retrieve_video_file(file_id, headers, log=self._log, outputs=self.parameter_output_values)
 
             # Save the video
             self._save_video_from_url(video_url)
@@ -414,97 +407,6 @@ class MinimaxTextToVideo(DataNode):
                 sanitized_payload["prompt"] = sanitized_payload["prompt"][:PROMPT_TRUNCATE_LENGTH] + "..."
 
             self._log(f"Request payload: {_json.dumps(sanitized_payload, indent=2)}")
-
-    def _poll_for_completion(self, task_id: str, headers: dict[str, str]) -> str:
-        """Poll the API for task completion and return file_id."""
-        self._log(f"Starting to poll for task completion: {task_id}")
-
-        query_url = "https://api.minimax.io/v1/query/video_generation"
-        fields = {"task_id": task_id}
-        last_error: NodeError | None = None
-        last_body: dict[str, Any] | None = None
-
-        for attempt in range(MAX_POLLING_ATTEMPTS):
-            # Recommended polling interval to avoid unnecessary server load
-            time.sleep(POLLING_INTERVAL)
-            last_error = None
-
-            try:
-                # Query task status with task_id as query parameter
-                response = requests.get(
-                    query_url, headers=headers, params={"task_id": task_id}, timeout=DEFAULT_TIMEOUT
-                )
-                response.raise_for_status()
-                status_data = response.json()
-            except requests.RequestException as e:
-                self._log(f"Polling request failed (attempt {attempt + 1}): {e}")
-                last_error = request_error(e, fields=fields)
-                continue
-
-            if not isinstance(status_data, dict):
-                status_data = {}
-            last_body = status_data
-
-            status = status_data.get("status", "unknown")
-            self._log(f"Polling attempt {attempt + 1}: Status = {status}")
-
-            if status == "Fail":
-                # Log full response for debugging
-                self._log(f"Full API error response: {_json.dumps(status_data, indent=2)}")
-                raise task_failed_error(status_data, task_id=task_id)
-
-            # Minimax reports other failures, such as a rejected key, inside an HTTP 200 body.
-            if error := base_resp_error(status_data, fields=fields):
-                self._log(f"Polling attempt {attempt + 1}: {error}")
-                if status_data["base_resp"]["status_code"] in CREDENTIAL_REJECTED_CODES:
-                    raise error
-                last_error = error
-                continue
-
-            if status == "Success":
-                self._log("Task completed successfully")
-                file_id = status_data.get("file_id")
-                if not file_id:
-                    raise result_error("file ID", fields=fields, response=status_data)
-                return file_id
-            # Task still in progress (Processing, Pending, etc.)
-
-        # The last poll failed, so report why instead of calling it a timeout.
-        if last_error is not None:
-            raise last_error
-
-        # If we get here, we've exceeded max attempts
-        raise NodeError(
-            f"The Minimax video did not finish within {MAX_POLLING_ATTEMPTS * POLLING_INTERVAL // 60} minutes. "
-            "It may still be running in Minimax. Run the node again, or check the task ID in your Minimax account.",
-            fields=fields,
-            response=last_body,
-        )
-
-    def _retrieve_video_file(self, file_id: str, headers: dict[str, str]) -> str:
-        """Retrieve video download URL from file_id."""
-        self._log(f"Retrieving video file for file_id: {file_id}")
-
-        retrieve_url = "https://api.minimax.io/v1/files/retrieve"
-        fields = {"file_id": file_id}
-        response_data = request_json(
-            "GET",
-            retrieve_url,
-            headers=headers,
-            params={"file_id": file_id},
-            timeout=DEFAULT_TIMEOUT,
-            fields=fields,
-        )
-        self.parameter_output_values["provider_response"] = response_data
-
-        # Extract download URL
-        file_info = response_data.get("file")
-        download_url = file_info.get("download_url") if isinstance(file_info, dict) else None
-        if not download_url:
-            raise result_error("download URL", fields=fields, response=response_data)
-
-        self._log(f"Retrieved download URL: {download_url[:100]}...")
-        return download_url
 
     def _save_video_from_url(self, video_url: str) -> None:
         """Save video from URL to project storage."""

@@ -326,14 +326,14 @@ Comprehensive validation and error reporting:
 - Model compatibility verification
 - Input problems name the parameter and the current value
 - Failures reach the editor as node errors: Minimax's own message, with the error code, task ID or file ID, and the response body under More info
-- A rejected API key (Minimax error 1004 or 2049) fails the run with a link to Settings. Before, the node finished with empty outputs.
+- A rejected API key (Minimax error 1004 or 2049) fails the run with a link to Settings.
 
 ## 🐛 Troubleshooting
 
 ### "Invalid params, first_frame_image" Error
 
 This is Minimax's own text. The editor shows it as the error message, with the full response under More info. It usually means:
-- Image is from localhost (automatically converted now)
+- Image is from localhost (the nodes convert these to base64)
 - Image format doesn't match MIME type
 - Image dimensions outside valid range
 
